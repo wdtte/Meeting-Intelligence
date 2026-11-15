@@ -4,6 +4,13 @@
 
 已实现：指定应用录音、可选麦克风分轨录音、录制中分段转写、字幕保存和失败续转、历史记录、双轨混听/单轨回放、点击字幕回听、菜单栏控制和主窗口内设置。支持可扩展的 provider 接口，目前提供 Apple 本地转写和 Qwen-Audio 3.1 会后异步精校。说话人识别、摘要和 SQLite 索引尚未接入。
 
+已提供面向 Agent 的只读 `meeting` CLI：会议筛选、状态查看、转写分页、关键词及上下文检索、JSON/Markdown 证据快照、JSON Schema 和目录诊断。应用无需启动，也不需要模型 Key。完整接口、安装方式和 Agent 使用流程见 [CLI-USAGE.md](CLI-USAGE.md)。
+
+```sh
+swift run meeting --help
+swift run meeting list --has-transcript --limit 20
+```
+
 ## 构建与运行
 
 ```sh

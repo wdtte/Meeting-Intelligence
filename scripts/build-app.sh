@@ -13,6 +13,8 @@ mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 # Replace the executable inode instead of truncating a binary mapped by a running recording.
 cp "$bin_dir/MeetingIntelligence" "$app_path/Contents/MacOS/.MeetingIntelligence.next"
 mv -f "$app_path/Contents/MacOS/.MeetingIntelligence.next" "$app_path/Contents/MacOS/MeetingIntelligence"
+cp "$bin_dir/meeting" "$app_path/Contents/MacOS/.meeting.next"
+mv -f "$app_path/Contents/MacOS/.meeting.next" "$app_path/Contents/MacOS/meeting"
 cp Resources/Info.plist "$app_path/Contents/Info.plist"
 build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 build_commit="$(git rev-parse --short HEAD 2>/dev/null || print uncommitted)"
@@ -32,6 +34,7 @@ if [[ -z "$signing_identity" ]]; then
     print 'No unique signing identity; using ad-hoc signing. Keychain may ask again after rebuilding.'
   fi
 fi
+codesign --force --sign "$signing_identity" "$app_path/Contents/MacOS/meeting"
 codesign --force --sign "$signing_identity" "$app_path"
 codesign --verify --strict "$app_path"
 # Refresh only this app's registration, leaving the user's Dock and other apps alone.
