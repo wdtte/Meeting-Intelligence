@@ -87,7 +87,7 @@ enum TranscriptHTMLWriter {
             "DATE": escape(date.string(from: recording.startedAt)),
             "DURATION": AudioTimeline.clock(recording.duration),
             "COUNT": String(transcript.segments.count),
-            "NOTICE": completed ? "已导出的转写快照 · 不随应用中的后续修改更新" : "转写尚未全部完成 · 本文件仅包含导出时已有的内容",
+            "NOTICE": completed ? "" : "转写尚未全部完成 · 本文件仅包含导出时已有的内容",
             "TRANSCRIPT_HINT": audioURL == nil ? "按时间排列，保留发言来源。" : "点击时间戳或文字，回听对应发言。"
         ]
         guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
