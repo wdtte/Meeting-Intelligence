@@ -74,9 +74,20 @@ input[type=search] {
 input[type=search]::placeholder { color: var(--muted); }
 .transcript-scroll {
   --scroll-gutter: calc(var(--row-inset) + 4px);
+  --scroll-thumb: color-mix(in srgb, var(--muted) 45%, transparent);
   min-height: 0; overflow: auto; overscroll-behavior-y: contain; scroll-padding-block: 12px;
   margin-inline: calc(-1 * var(--scroll-gutter)); padding-inline: var(--scroll-gutter);
   padding-block: 2px max(12px, env(safe-area-inset-bottom));
+}
+@media (hover: hover) and (pointer: fine) and (forced-colors: none) {
+  .transcript-scroll { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
+  @supports not (scrollbar-color: red transparent) {
+    .transcript-scroll::-webkit-scrollbar { width: 8px; }
+    .transcript-scroll::-webkit-scrollbar-thumb {
+      border: 2px solid transparent; border-radius: 8px;
+      background: var(--scroll-thumb) padding-box;
+    }
+  }
 }
 .transcript-scroll:focus-visible { outline-offset: -2px; }
 .segment {
