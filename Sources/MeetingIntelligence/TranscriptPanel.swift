@@ -134,6 +134,7 @@ struct TranscriptPanel: View {
                             }
                         }.padding(.top, 2).padding(.bottom, 16)
                     }
+                    .frame(minHeight: 0, maxHeight: .infinity)
                     .onChange(of: playbackSegmentID, initial: true) { _, _ in
                         if !live && followPlayback { revealPlayback(proxy, animated: model.playback.isPlaying) }
                     }
@@ -150,7 +151,7 @@ struct TranscriptPanel: View {
                         if live && follow, let id = segments.last?.id { proxy.scrollTo(id, anchor: .bottom) }
                     }
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }.frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         }
         .confirmationDialog("重新提交未完成的云端任务？", isPresented: $confirmCloudResubmission) {
             Button("重新提交（可能重复计费）", role: .destructive) { model.resubmitCloudSelected() }

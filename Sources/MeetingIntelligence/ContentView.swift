@@ -72,27 +72,35 @@ struct ContentView: View {
                 }.buttonStyle(.plain).padding(.horizontal, 8).padding(.bottom, 10).disabled(model.isBusy)
             }.navigationSplitViewColumnWidth(min: 220, ideal: 252, max: 320)
         } detail: {
-            Group {
-                if model.isBusy { recordingView }
-                else if model.page == .settings { SettingsPage(model: model) }
-                else if let recording = model.selectedRecording { detail(recording) }
-                else { setupView }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .textBackgroundColor))
-            // Keep the transport outside the page/scroll subtree. Switching a
-            // meeting updates its contents without relocating the glass surface.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !model.isBusy, model.page == .meetings, let recording = model.selectedRecording {
-                    MeetingPlaybackBar(playback: model.playback, recording: recording)
-                        .disabled(model.deletingRecordingID == recording.id)
-                        .frame(maxWidth: 840)
-                        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 16)
-                        .frame(maxWidth: .infinity)
-                        .transition(.identity)
-                        .transaction { $0.animation = nil; $0.disablesAnimations = true }
+            // Bound the page to the window, and reserve the transport's height
+            // before laying out expandable content. A safe-area inset on that
+            // content can move outside the viewport during disclosure layout.
+            GeometryReader { viewport in
+                VStack(spacing: 0) {
+                    Group {
+                        if model.isBusy { recordingView }
+                        else if model.page == .settings { SettingsPage(model: model) }
+                        else if let recording = model.selectedRecording { detail(recording) }
+                        else { setupView }
+                    }
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
+
+                    if !model.isBusy, model.page == .meetings, let recording = model.selectedRecording {
+                        MeetingPlaybackBar(playback: model.playback, recording: recording)
+                            .disabled(model.deletingRecordingID == recording.id)
+                            .frame(maxWidth: 840)
+                            .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 16)
+                            .frame(maxWidth: .infinity)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .layoutPriority(1)
+                            .transition(.identity)
+                            .transaction { $0.animation = nil; $0.disablesAnimations = true }
+                    }
                 }
+                .frame(width: viewport.size.width, height: viewport.size.height)
             }
+            .background(Color(nsColor: .textBackgroundColor))
         }
         .navigationTitle("Meeting Intelligence")
         .toolbar(removing: .title)
