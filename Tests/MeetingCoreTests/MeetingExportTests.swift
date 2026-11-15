@@ -24,7 +24,7 @@ private func htmlFixtureAudio(recording: inout Recording, store: RecordingStore)
     let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 192000)!
     buffer.frameLength = buffer.frameCapacity
     for frame in 0..<Int(buffer.frameLength) {
-        buffer.floatChannelData![0][frame] = 0.15 * Float(sin(2 * .pi * 440 * Double(frame) / 16000))
+        buffer.floatChannelData![0][frame] = frame < 16_000 ? 0 : 0.15 * Float(sin(2 * .pi * 440 * Double(frame) / 16000))
     }
     try FileManager.default.createDirectory(at: store.directory(for: recording.id), withIntermediateDirectories: true)
     let file = try AVAudioFile(forWriting: store.audioURL(recording: recording.id, fileName: "0.wav"), settings: format.settings)
@@ -39,6 +39,7 @@ private func htmlFixtureAudio(recording: inout Recording, store: RecordingStore)
     transcript.status = "running"
     let injected = "</script><script>window.exportInjected = true</script><img src=x onerror=alert(1)> & \"quoted\""
     transcript.segments[0].text = injected
+    transcript.segments[0].engine = "Qwen & <custom>"
     let destination = store.root.appendingPathComponent("transcript.html")
     try Data("previous export".utf8).write(to: destination)
     try await MeetingExporter.export(recording, transcript: transcript, store: store, kind: .transcript, to: destination)
@@ -50,6 +51,7 @@ private func htmlFixtureAudio(recording: inout Recording, store: RecordingStore)
     #expect(!html.contains("data:audio/mp4;base64,"))
     #expect(html.contains("转写尚未全部完成"))
     #expect(html.contains("系统音频") && html.contains("麦克风"))
+    #expect(html.contains("Qwen &amp; &lt;custom&gt;") && html.contains("Apple SpeechTranscriber"))
     #expect(html.contains("00:10"))
     #expect(!html.contains(store.root.path))
     #expect(try FileManager.default.contentsOfDirectory(atPath: store.root.path).allSatisfy { !$0.hasPrefix(".meeting-export-") })
@@ -73,6 +75,13 @@ private func htmlFixtureAudio(recording: inout Recording, store: RecordingStore)
     #expect(!html.contains("{{NONCE}}"))
     #expect(html.contains("data-start=\"10.0\""))
     #expect(html.contains("<button class=\"timestamp\""))
+    #expect(html.contains("href=\"#clock\"/></svg>00:12"))
+    let waveform = try #require(html.range(of: "data-peaks=\""))
+    let waveformEnd = try #require(html[waveform.upperBound...].firstIndex(of: "\""))
+    let peaks = html[waveform.upperBound..<waveformEnd].split(separator: ",").compactMap { UInt8($0) }
+    #expect(peaks.count == 384)
+    #expect(peaks.prefix(25).allSatisfy { $0 == 0 })
+    #expect(peaks.dropFirst(45).contains { $0 > 25 })
     #expect(html.contains("media-src data:"))
     #expect(try FileManager.default.contentsOfDirectory(atPath: store.root.path).allSatisfy { !$0.hasPrefix(".meeting-export-") })
     if let previewPath = ProcessInfo.processInfo.environment["MI_EXPORT_PREVIEW_DIR"] {
