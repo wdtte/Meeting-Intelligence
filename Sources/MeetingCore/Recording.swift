@@ -1,0 +1,67 @@
+import Foundation
+
+public enum AudioSource: String, Codable, Sendable, CaseIterable {
+    // Transcript roles are these two capture sources, never inferred speakers.
+    case application, microphone
+    public var label: String { self == .application ? "应用音频" : "麦克风" }
+}
+
+public enum RecordingStatus: String, Codable, Sendable {
+    case recording, completed, interrupted, failed
+}
+
+public struct AudioChunk: Identifiable, Codable, Sendable, Equatable {
+    public var id: UUID = UUID()
+    public var source: AudioSource?
+    public var audioSource: AudioSource { source ?? .application }
+    public var fileName: String
+    public var offset: Double
+    public var duration: Double
+    public var sampleRate: Double
+    public var channels: UInt32
+    public var isComplete: Bool
+    public var end: Double { offset + duration }
+}
+
+public struct Recording: Identifiable, Codable, Sendable, Equatable {
+    public var schemaVersion = 1
+    public var id: UUID = UUID()
+    public var title: String
+    public var applicationName: String
+    public var bundleIdentifier: String
+    public var startedAt: Date = Date()
+    public var endedAt: Date?
+    public var status: RecordingStatus = .recording
+    public var chunks: [AudioChunk] = []
+    public var note: String?
+    public var transcriptPath: String?
+    public var transcriptionLocale: String?
+    public var cloudTranscription: CloudTranscriptionConfiguration?
+    public var microphoneCaptureMode: MicrophoneCaptureMode?
+    public var duration: Double { chunks.filter(\.isComplete).map(\.end).max() ?? 0 }
+    public var audioDuration: Double { chunks.filter(\.isComplete).reduce(0) { $0 + $1.duration } }
+
+    public init(title: String, applicationName: String, bundleIdentifier: String) {
+        self.title = title; self.applicationName = applicationName; self.bundleIdentifier = bundleIdentifier
+    }
+}
+
+public enum MeetingError: LocalizedError, Sendable {
+    case message(String)
+    public var errorDescription: String? { if case .message(let message) = self { return message }; return nil }
+}
+
+public enum AudioTimeline {
+    public static func position(_ time: Double, duration: Double) -> Double {
+        guard time.isFinite, duration.isFinite else { return 0 }
+        return min(max(0, time), max(0, duration))
+    }
+    public static func playableChunks(_ chunks: [AudioChunk], after time: Double) -> [AudioChunk] {
+        chunks.filter { $0.isComplete && $0.duration > 0 && $0.end > time }.sorted { $0.offset < $1.offset }
+    }
+    public static func clock(_ seconds: Double) -> String {
+        let value = Int(max(0, seconds.isFinite ? seconds : 0))
+        if value >= 3600 { return String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60) }
+        return String(format: "%02d:%02d", value / 60, value % 60)
+    }
+}

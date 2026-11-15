@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; media-src data:; script-src 'nonce-{{NONCE}}'; style-src 'nonce-{{NONCE}}'; base-uri 'none'; form-action 'none'">
+<title>{{TITLE}} · 会议记录</title>
+<style nonce="{{NONCE}}">
+:root { color-scheme: light dark; --bg:#f6f6f4; --surface:#fff; --text:#242424; --muted:#626262; --border:#dededb; --active:#eeeeeb; --focus:#333; }
+* { box-sizing:border-box; }
+body { margin:0; color:var(--text); background:var(--bg); font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; }
+main { max-width:900px; margin:auto; padding:48px 28px 64px; }
+.brand { display:flex; align-items:center; gap:12px; font-size:12px; font-weight:650; letter-spacing:.1em; color:var(--muted); }
+.mark { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; background:var(--active); border-radius:10px; letter-spacing:2px; font-size:20px; color:var(--text); }
+h1 { font-size:clamp(25px,4vw,38px); line-height:1.35; font-weight:650; letter-spacing:-.035em; margin:24px 0 14px; overflow-wrap:anywhere; }
+.metadata { display:flex; flex-wrap:wrap; gap:8px 20px; color:var(--muted); font-size:14px; }
+.notice { color:var(--muted); font-size:13px; margin:14px 0 0; }
+header { margin-bottom:28px; }
+.player { position:sticky; top:12px; z-index:2; background:var(--surface); padding:20px 24px; border:1px solid var(--border); border-radius:16px; box-shadow:0 4px 16px #00000006; margin-bottom:28px; }
+.player-heading, .player-options { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px 20px; font-size:13px; }
+.player-heading span { color:var(--muted); }
+audio { display:block; width:100%; margin:14px 0 8px; }
+.player-options label { display:inline-flex; align-items:center; gap:8px; min-height:36px; }
+select { padding:5px 8px; border:1px solid var(--border); border-radius:6px; font:inherit; background:var(--surface); color:var(--text); }
+input[type=checkbox] { width:16px; height:16px; accent-color:var(--text); }
+.transcript { background:var(--surface); border:1px solid var(--border); border-radius:16px; overflow:hidden; }
+.transcript-header { padding:24px 24px 16px; border-bottom:1px solid var(--border); }
+h2 { font-size:18px; margin:0 0 4px; font-weight:650; }
+.hint { font-size:13px; color:var(--muted); margin:0 0 18px; }
+.search-row { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; font-size:13px; }
+.search-row label { font-weight:550; }
+input[type=search] { min-width:0; flex:1; min-height:42px; padding:8px 12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; font:inherit; color:var(--text); }
+#count { color:var(--muted); white-space:nowrap; }
+.segment { display:grid; grid-template-columns:100px minmax(0,1fr); gap:20px; padding:20px 24px; border-bottom:1px solid var(--border); scroll-margin-top:250px; }
+.segment:last-child { border-bottom:0; }
+.segment.is-active { background:var(--active); box-shadow:inset 3px 0 0 var(--text); }
+.segment-meta { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.timestamp { font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--text); font-variant-numeric:tabular-nums; display:inline-flex; align-items:center; min-height:32px; }
+button.timestamp { cursor:pointer; background:var(--bg); border:1px solid var(--border); border-radius:7px; padding:4px 9px; min-height:36px; }
+button.timestamp:hover { background:var(--active); }
+.source { color:var(--muted); font-size:12px; }
+.segment-text { margin:3px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.has-audio .segment-text { cursor:pointer; }
+.empty { margin:0; padding:32px 24px; color:var(--muted); text-align:center; }
+footer { margin-top:24px; color:var(--muted); font-size:12px; text-align:center; }
+:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
+[hidden] { display:none; }
+@media (prefers-color-scheme:dark) { :root { --bg:#191919; --surface:#222; --text:#ededeb; --muted:#b0b0ac; --border:#3c3c39; --active:#333330; --focus:#ddd; } }
+@media (max-width:540px) { main { padding:24px 14px 36px; } .player { top:6px; padding:16px; } .player-heading span { display:none; } .transcript-header { padding:20px 16px 16px; } .segment { grid-template-columns:1fr; gap:8px; padding:18px 16px; } .segment-meta { flex-direction:row; align-items:center; gap:12px; } button.timestamp { min-height:44px; } .search-row label { width:100%; } }
+@media print { :root { --bg:#fff; --surface:#fff; --text:#000; --muted:#555; --border:#ddd; } main { max-width:none; padding:0; } .player, .search-row, #no-results { display:none; } .segment { break-inside:avoid; } .segment[hidden] { display:grid; } .segment.is-active { background:transparent; box-shadow:none; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="brand"><span class="mark" aria-hidden="true">ııı</span>MEETING INTELLIGENCE</div>
+  <h1>{{TITLE}}</h1>
+  <div class="metadata"><span>{{DATE}}</span><span>{{APPLICATION}}</span><span>{{COUNT}} 段发言</span></div>
+  <p class="notice">{{NOTICE}}</p>
+</header>
+{{PLAYER}}
+<section class="transcript" aria-labelledby="transcript-title">
+  <div class="transcript-header">
+    <h2 id="transcript-title">转写记录</h2>
+    <p class="hint">{{TRANSCRIPT_HINT}}</p>
+    <div class="search-row" id="search-row" hidden><label for="search">搜索转写</label><input type="search" id="search" placeholder="输入关键词" autocomplete="off"><span id="count" role="status" aria-live="polite">{{COUNT}} 段发言</span></div>
+  </div>
+  <div id="segments">{{SEGMENTS}}</div>
+  <p id="no-results" class="empty" hidden>没有找到匹配的内容，试试其它关键词。</p>
+</section>
+<footer>Meeting Intelligence · 单文件导出 · 可离线查看</footer>
+</main>
+<script nonce="{{NONCE}}">
+(() => {
+  'use strict';
+  const audio = document.getElementById('audio');
+  const search = document.getElementById('search');
+  const rows = [...document.querySelectorAll('.segment')].map(element => ({
+    element, start:Number(element.dataset.start), end:Number(element.dataset.end),
+    text:element.textContent.toLocaleLowerCase()
+  }));
+  document.getElementById('search-row').hidden = false;
+  search.addEventListener('input', () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    let count = 0;
+    for (const row of rows) {
+      row.element.hidden = !row.text.includes(query);
+      if (!row.element.hidden) count++;
+    }
+    document.getElementById('count').textContent = query ? `${count} / ${rows.length} 段发言` : `${rows.length} 段发言`;
+    document.getElementById('no-results').hidden = count !== 0 || rows.length === 0;
+  });
+  if (!audio) return;
+  document.body.classList.add('has-audio');
+  const follow = document.getElementById('follow');
+  const error = document.getElementById('audio-error');
+  let lastFollowed = null;
+  const update = () => {
+    let first = null;
+    for (const row of rows) {
+      const active = row.start <= audio.currentTime && audio.currentTime < row.end;
+      row.element.classList.toggle('is-active', active);
+      if (active) row.element.setAttribute('aria-current', 'true');
+      else row.element.removeAttribute('aria-current');
+      if (active && !row.element.hidden && !first) first = row.element;
+    }
+    if (follow.checked && !audio.paused && first && first !== lastFollowed) first.scrollIntoView({block:'center', behavior:'instant'});
+    lastFollowed = first;
+  };
+  const seek = async (time) => {
+    try {
+      error.hidden = true;
+      audio.currentTime = Math.min(time, Number.isFinite(audio.duration) ? audio.duration : time);
+      await audio.play();
+      update();
+    } catch (_) {
+      error.textContent = '未能开始播放，请使用上方播放器重试。';
+      error.hidden = false;
+    }
+  };
+  document.getElementById('segments').addEventListener('click', event => {
+    if (window.getSelection()?.toString()) return;
+    const row = event.target.closest('.segment');
+    if (row) seek(Number(row.dataset.start));
+  });
+  document.getElementById('speed').addEventListener('change', event => { audio.playbackRate = Number(event.target.value); });
+  follow.addEventListener('change', () => { lastFollowed = null; update(); });
+  audio.addEventListener('timeupdate', update);
+  audio.addEventListener('seeked', update);
+  audio.addEventListener('play', update);
+  audio.addEventListener('error', () => {
+    error.textContent = '当前浏览器无法读取内嵌音频，请用 Safari、Chrome 或 Edge 打开完整的 HTML 文件。';
+    error.hidden = false;
+  });
+})();
+</script>
+</body>
+</html>
