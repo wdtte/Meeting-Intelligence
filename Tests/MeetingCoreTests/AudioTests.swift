@@ -58,6 +58,46 @@ private func meeting() -> Recording {
     #expect(try store.loadAll(recover: true).first == recovered)
 }
 
+@Test func checkpointRecoversQuietMicrophoneWithoutChangingSystemAudioOrNormalInput() throws {
+    let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
+    let quiet = sampleBuffer()
+    // Roughly match the low capture seen before switching to a headset:
+    // a short burst of speech, ~-54 dBFS peak with ~17 dB of crest factor.
+    for channel in 0..<2 {
+        for frame in 0..<Int(quiet.frameLength) {
+            quiet.floatChannelData![channel][frame] = frame < 200 ? quiet.floatChannelData![channel][frame] * 0.005 : 0
+        }
+    }
+    let normal = sampleBuffer()
+    let silence = sampleBuffer()
+    for channel in 0..<2 {
+        for frame in 0..<Int(silence.frameLength) { silence.floatChannelData![channel][frame] = 0 }
+    }
+    let writer = try ChunkWriter(recording: meeting(), store: store, format: quiet.format)
+    _ = try writer.append(quiet, at: 0)
+    _ = try writer.append(quiet, at: 0.01, source: .microphone)
+    try writer.checkpoint()
+    _ = try writer.append(normal, at: 0.25, source: .microphone)
+    try writer.checkpoint()
+    _ = try writer.append(silence, at: 0.5, source: .microphone)
+    let recording = try writer.finish()
+    #expect(recording.chunks.map(\.offset) == [0, 0.01, 0.25, 0.5])
+    #expect(recording.chunks.allSatisfy { $0.isComplete && abs($0.duration - 0.1) < 0.00001 })
+
+    let peaks = try recording.chunks.map { chunk in
+        let file = try AVAudioFile(forReading: store.audioURL(recording: recording.id, fileName: chunk.fileName))
+        #expect(file.length == 4800)
+        let read = try #require(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4800))
+        try file.read(into: read)
+        let frames = UnsafeBufferPointer(start: read.floatChannelData![0], count: Int(read.frameLength))
+        return frames.map(abs).max() ?? 0
+    }
+    #expect(abs(peaks[0] - 0.002) < 0.0001)
+    #expect((0.18 ... 0.22).contains(peaks[1]))
+    #expect(abs(peaks[2] - 0.4) < 0.0001)
+    #expect(peaks[3] == 0)
+}
+
 @Test func recoveryHandlesRenameBeforeManifestCommit() throws {
     let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
     let buffer = sampleBuffer()

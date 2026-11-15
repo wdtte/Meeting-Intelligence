@@ -127,6 +127,18 @@ final class AppModel {
     var microphoneEnabled = UserDefaults.standard.bool(forKey: "microphoneEnabled") {
         didSet { UserDefaults.standard.set(microphoneEnabled, forKey: "microphoneEnabled") }
     }
+    var microphoneDeviceID = UserDefaults.standard.string(forKey: "microphoneDeviceID") ?? "" {
+        didSet { UserDefaults.standard.set(microphoneDeviceID, forKey: "microphoneDeviceID") }
+    }
+    private(set) var microphoneDevices: [MicrophoneDevice] = []
+    var selectedMicrophoneUnavailable: Bool {
+        !microphoneDeviceID.isEmpty && !microphoneDevices.contains { $0.id == microphoneDeviceID }
+    }
+    func refreshMicrophones() {
+        if let devices = try? MicrophoneDevice.available(), devices != microphoneDevices {
+            microphoneDevices = devices
+        }
+    }
     // This choice belongs to the next recording, never to the provider settings.
     var useCloudTranscription = false
     var transcriptionLocale = UserDefaults.standard.string(forKey: "transcriptionLocale") ?? "zh-CN" {
@@ -217,10 +229,12 @@ final class AppModel {
     var modelPreparing = false
     var microphonePeak: Float = 0
     var microphoneLastAudioAt: TimeInterval?
+    var microphoneWarning: String?
     var transcriptionNotice: String?
     var recoveringAudioDevice = false
     var microphoneStatus: String {
         guard microphoneEnabled else { return "麦克风未开启" }
+        if let microphoneWarning { return microphoneWarning }
         if recoveringAudioDevice { return "正在重新连接麦克风…" }
         let processing = state == .recording ? " · 共享输入" : ""
         guard let time = microphoneLastAudioAt, ProcessInfo.processInfo.systemUptime - time < 4 else { return "麦克风暂未检测到声音" + processing }
@@ -347,14 +361,16 @@ final class AppModel {
         activeRecordingID = recording.id; captureName = AudioSource.application.label
         recoveringAudioDevice = false
         elapsed = 0; savedDuration = 0; peak = 0; lastAudioAt = nil
-        microphonePeak = 0; microphoneLastAudioAt = nil; transcriptionNotice = nil
+        microphonePeak = 0; microphoneLastAudioAt = nil; microphoneWarning = nil; transcriptionNotice = nil
         levels = [Float](repeating: 0, count: 90)
         do {
             if microphoneEnabled {
                 let granted = await AVCaptureDevice.requestAccess(for: .audio)
                 guard granted else { throw MeetingError.message("麦克风权限未开启。请在系统设置中允许，或关闭麦克风选项后录制系统音频。") }
             }
-            try await capture.start(recording: recording, store: store, microphone: microphoneEnabled) { [weak self] event in
+            let microphoneUID = microphoneDeviceID.isEmpty ? nil : microphoneDeviceID
+            try await capture.start(recording: recording, store: store, microphone: microphoneEnabled,
+                                    microphoneUID: microphoneUID) { [weak self] event in
                 Task { @MainActor in self?.receive(event) }
             }
             startedAt = ProcessInfo.processInfo.systemUptime
@@ -376,6 +392,9 @@ final class AppModel {
             peak = 0; microphonePeak = 0; lastAudioAt = nil; microphoneLastAudioAt = nil
         case .snapshot(let recording):
             if let store { transcription.submit(recording, store: store) }
+        case .microphoneUnavailable(let warning):
+            microphoneWarning = warning
+            microphonePeak = 0; microphoneLastAudioAt = nil
         case .microphoneMeter(let meter):
             microphonePeak = max(microphonePeak, meter.peak)
             savedDuration = max(savedDuration, meter.savedDuration)

@@ -22,7 +22,7 @@ struct SettingsPage: View {
                 }.padding(28).settingsCard()
                 VStack(alignment: .leading, spacing: 20) {
                     Label("录音与本地转写", systemImage: "waveform").font(.headline)
-                    Toggle("同时录制麦克风", isOn: $model.microphoneEnabled)
+                    MicrophoneControls(model: model)
                     Label("建议佩戴耳机，以获得最佳录音与转写质量，减少扬声器声音被麦克风重复收录。", systemImage: "headphones")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("转写角色固定为系统音频与麦克风，按采集来源区分。")

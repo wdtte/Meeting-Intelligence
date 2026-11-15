@@ -48,27 +48,25 @@ struct TranscriptPanel: View {
     }
     private var document: TranscriptDocument? { model.transcription.documents[recordingID] }
     private var segments: [TranscriptSegment] { document?.segments ?? [] }
+    private var recording: Recording? { model.recordings.first { $0.id == recordingID } }
     private var isRunning: Bool { model.transcription.running.contains(recordingID) }
-    private var cloudRequested: Bool { model.selectedRecording?.cloudTranscription != nil || document?.cloud != nil }
-    private var status: String {
-        if let cloud = document?.cloud {
-            if let error = cloud.error { return error }
-            if cloud.status == "completed" {
-                return cloud.noSpeechCount > 0
-                    ? "云端精校完成 · \(cloud.noSpeechCount) 个片段未识别到语音，已保留本地结果"
-                    : "云端精校完成"
-            }
-            if model.transcription.cloudRunning.contains(recordingID) { return "正在云端精校 · 已完成 \(cloud.completedCount) 个片段" }
+    private var isCloudRunning: Bool { model.transcription.cloudRunning.contains(recordingID) }
+    private var cloudModel: String? {
+        if let provider = document?.cloud?.configuration.provider ?? recording?.cloudTranscription?.provider {
+            return provider.label
         }
+        return live && model.useCloudTranscription ? model.cloudProvider.label : nil
+    }
+    private var cloudRequested: Bool { cloudModel != nil }
+    private var status: String {
         if let error = document?.error { return error }
         if live, let notice = model.transcriptionNotice { return notice }
-        if isRunning { return "正在本地转写，音频已保存" }
+        if isRunning && !isCloudRunning { return "正在本地转写，音频已保存" }
         if live { return "每段音频保存后更新本地字幕，约 10 秒一次" }
         if document?.status == "completed" { return segments.isEmpty ? "转写完成，未识别到语音" : "本地转写完成" }
         return "可从已保存的录音继续转写"
     }
-    private var hasError: Bool { document?.error != nil || document?.cloud?.error != nil }
-    private var hasAudio: Bool { (model.recordings.first { $0.id == recordingID }?.duration ?? 0) > 0 }
+    private var hasAudio: Bool { (recording?.duration ?? 0) > 0 }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -97,7 +95,10 @@ struct TranscriptPanel: View {
                             }
                         }
                     }
-                    transcriptionStatus
+                    if live || !cloudRequested || document?.error != nil || (isRunning && !isCloudRunning) {
+                        transcriptionStatus
+                    }
+                    cloudProgress
                     exportStatus
                     if let cloud = document?.cloud, !live {
                         DisclosureGroup("转写详情") {
@@ -197,10 +198,44 @@ struct TranscriptPanel: View {
 
     private var transcriptionStatus: some View {
         HStack(alignment: .top, spacing: 7) {
-            if isRunning { ProgressView().controlSize(.mini) }
-            else { Image(systemName: hasError ? "exclamationmark.circle" : "text.bubble").font(.caption) }
+            if isRunning && !isCloudRunning { ProgressView().controlSize(.mini) }
+            else { Image(systemName: document?.error != nil ? "exclamationmark.circle" : "text.bubble").font(.caption) }
             Text(status).font(.caption).textSelection(.enabled)
-        }.foregroundStyle(hasError ? Color.orange : Color.secondary)
+        }.foregroundStyle(document?.error != nil ? Color.orange : Color.secondary)
+    }
+
+    @ViewBuilder private var cloudProgress: some View {
+        if let cloudModel {
+            let cloud = document?.cloud
+            let chunks = recording?.chunks.filter(\.isComplete) ?? []
+            let completed = chunks.count { cloud?.jobs[$0.id.uuidString]?.completed == true }
+            let noFragment = cloud?.error?.contains("（SUCCESS_WITH_NO_VALID_FRAGMENT）") == true
+            let progressText = switch cloud?.status {
+            case "completed": "已完成"
+            case "failed" where noFragment: "可继续"
+            case "failed": "未完成"
+            case "interrupted": "已暂停"
+            default: isCloudRunning ? "正在精校" : live ? "录制结束后开始" : "等待开始"
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Label(cloudModel, systemImage: "cloud").fontWeight(.medium)
+                    Text(progressText)
+                    Spacer(minLength: 4)
+                    if !live, !chunks.isEmpty { Text("\(completed) / \(chunks.count) 个片段").monospacedDigit() }
+                }
+                if !live, !chunks.isEmpty {
+                    ProgressView(value: Double(completed), total: Double(chunks.count))
+                        .accessibilityLabel("云端转写进度")
+                }
+                if let error = cloud?.error {
+                    Text(noFragment ? "有片段未识别到有效语音。点击「继续云端转写」可查询原任务并接着处理。" : error)
+                        .foregroundStyle(.orange).textSelection(.enabled)
+                } else if let cloud, cloud.noSpeechCount > 0 {
+                    Text("\(cloud.noSpeechCount) 个片段未识别到语音，已保留本地结果")
+                }
+            }.font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder private var primaryTranscriptionAction: some View {
@@ -279,6 +314,7 @@ private struct TranscriptRow: View {
     let live: Bool
     let active: Bool
     var play: () -> Void
+    private var engineLabel: String { segment.engine ?? "Apple SpeechTranscriber" }
 
     var body: some View {
         Button(action: play) {
@@ -287,8 +323,13 @@ private struct TranscriptRow: View {
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                     .frame(width: 58, alignment: .leading).padding(.top, 2)
                 VStack(alignment: .leading, spacing: 7) {
-                    Label(segment.source.label, systemImage: segment.source == .microphone ? "mic" : "speaker.wave.2")
-                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Label(segment.source.label, systemImage: segment.source == .microphone ? "mic" : "speaker.wave.2")
+                            .font(.system(size: 11, weight: .medium))
+                        Text(engineLabel).font(.caption2)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.primary.opacity(0.06), in: Capsule())
+                    }.foregroundStyle(.secondary)
                     Text(segment.text).font(.system(size: 14)).lineSpacing(5).foregroundStyle(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                 }
@@ -300,7 +341,7 @@ private struct TranscriptRow: View {
             }
             .contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(live)
-        .accessibilityLabel("\(segment.source.label)，\(AudioTimeline.clock(segment.start))，\(segment.text)")
-        .help(live ? "已保存的字幕" : "点击回听 · \(segment.engine ?? "Apple 本地")")
+        .accessibilityLabel("\(segment.source.label)，\(engineLabel)，\(AudioTimeline.clock(segment.start))，\(segment.text)")
+        .help(live ? engineLabel : "点击回听 · \(engineLabel)")
     }
 }

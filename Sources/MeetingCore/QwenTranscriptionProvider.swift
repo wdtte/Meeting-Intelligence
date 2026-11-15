@@ -128,7 +128,7 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
                 guard let results = output.results, results.count == 1, let result = results.first else {
                     throw MeetingError.message("云端结果的文件数量与提交不匹配，已保留本地字幕。")
                 }
-                if result.subtask_status == "FAILED", result.code == "ASR_RESPONSE_HAVE_NO_WORDS" {
+                if result.subtask_status == "FAILED", Self.isNoSpeech(result.code) {
                     return ProviderTranscription(segments: [], usage: envelope.usage?.value, noSpeechRecognized: true)
                 }
                 guard result.subtask_status == "SUCCEEDED" else {
@@ -147,7 +147,7 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
             case "FAILED", "CANCELED", "UNKNOWN":
                 let resultCode = output.results?.count == 1 ? output.results?.first?.code : nil
                 let code = output.code ?? envelope.code ?? resultCode
-                if output.task_status == "FAILED", code == "ASR_RESPONSE_HAVE_NO_WORDS" {
+                if output.task_status == "FAILED", Self.isNoSpeech(code) {
                     return ProviderTranscription(segments: [], usage: envelope.usage?.value, noSpeechRecognized: true)
                 }
                 throw Self.taskFailure(status: output.task_status, code: code)
@@ -155,6 +155,9 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
             }
         }
         throw MeetingError.message("云端任务仍未完成，稍后继续会查询已有 task ID。")
+    }
+    private static func isNoSpeech(_ code: String?) -> Bool {
+        code == "ASR_RESPONSE_HAVE_NO_WORDS" || code == "SUCCESS_WITH_NO_VALID_FRAGMENT"
     }
     private func send(_ request: URLRequest, stage: String, context: [String: String]) async throws -> (Data, HTTPURLResponse) {
         var fields = context

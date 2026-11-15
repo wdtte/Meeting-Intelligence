@@ -7,6 +7,7 @@ public enum CaptureEvent: Sendable {
     case meter(AudioMeter)
     case snapshot(Recording)
     case microphoneMeter(AudioMeter)
+    case microphoneUnavailable(String)
     case stopped(Recording)
     case failure(String)
     case recovering(Bool)
@@ -15,12 +16,10 @@ public enum CaptureEvent: Sendable {
 // The serial queue owns every mutable property; only the C ring crosses into HAL.
 public final class ProcessAudioCapture: @unchecked Sendable {
     private let queue = DispatchQueue(label: "MeetingIntelligence.capture", qos: .userInitiated)
-    private var micEngine: AVAudioEngine?
-    private var micContext: MicrophoneRing?
-    private var micRing: OpaquePointer?
-    private var micBuffer: AVAudioPCMBuffer?
-    private var micDevices: [AudioObjectID] = []
+    private var micInput: MicrophoneInput?
     private var microphoneEnabled = false
+    private var microphoneUID: String?
+    private var microphoneWarning: String?
     private var outputDevice: AudioObjectID = 0
     private var recovery: CaptureRecoverySchedule?
     private var recoveryError = ""
@@ -40,6 +39,7 @@ public final class ProcessAudioCapture: @unchecked Sendable {
     public init() {}
 
     public func start(recording: Recording, store: RecordingStore, microphone: Bool = false,
+                      microphoneUID: String? = nil,
                       onEvent: @escaping @Sendable (CaptureEvent) -> Void) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
@@ -50,13 +50,16 @@ public final class ProcessAudioCapture: @unchecked Sendable {
                 do {
                     self.callback = onEvent
                     var recording = recording
-                    recording.microphoneCaptureMode = microphone ? .shared : nil
                     self.microphoneEnabled = microphone
+                    self.microphoneUID = microphoneUID
+                    self.microphoneWarning = nil
                     self.recovery = nil
                     self.lastSnapshotCount = 0
                     // Opening a Bluetooth microphone can change the output profile.
                     // Establish input first, then capture the resulting output format.
-                    if microphone { try self.startMicrophone() }
+                    self.startMicrophoneIfEnabled()
+                    recording.microphoneCaptureMode = self.micInput == nil ? nil : .shared
+                    recording.note = self.microphoneWarning
                     try self.configureHardware()
                     guard let format = self.buffer?.format else { throw CaptureFormatChanged() }
                     self.writer = try ChunkWriter(recording: recording, store: store, format: format)
@@ -64,7 +67,7 @@ public final class ProcessAudioCapture: @unchecked Sendable {
                     // warm-up on both tracks until the serial writer can drain.
                     self.epoch = mach_absolute_time()
                     if let ring = self.ring { MIRingSetStartTime(ring, self.epoch) }
-                    if let ring = self.micRing { MIRingSetStartTime(ring, self.epoch) }
+                    if let ring = self.micInput?.ring { MIRingSetStartTime(ring, self.epoch) }
                     self.startTimer()
                     DiagnosticLog.shared.record("capture.started", fields: ["recording_id": recording.id.uuidString])
                     continuation.resume()
@@ -136,9 +139,7 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         return format != buffer.format
     }
     private func microphoneRouteIsStable() throws -> Bool {
-        guard let micEngine, let micBuffer, let micRing, micEngine.isRunning,
-              MIRingDropped(micRing) == 0, try microphoneDevices() == micDevices else { return false }
-        return micEngine.inputNode.outputFormat(forBus: 0) == micBuffer.format
+        try micInput?.routeIsStable() ?? false
     }
     private func tick() {
         guard writer != nil else { return }
@@ -164,7 +165,7 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         // Discard queued packets of uncertain format; never interpret them with a new rate.
         // Already-written samples are committed before opening the replacement hardware.
         if let ring { MIRingSetStartTime(ring, UInt64.max) }
-        if let micRing { MIRingSetStartTime(micRing, UInt64.max) }
+        if let micInput { MIRingSetStartTime(micInput.ring, UInt64.max) }
         try writer?.checkpoint()
         if let writer { callback?(.snapshot(writer.recording)) }
         recovery = CaptureRecoverySchedule(now: ProcessInfo.processInfo.systemUptime)
@@ -185,13 +186,13 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         do {
             let errors = cleanupHardware(preserveMicrophone: true)
             guard errors.isEmpty else { throw MeetingError.message(errors.joined(separator: "\n")) }
-            if microphoneEnabled, micEngine == nil { try startMicrophone() }
+            startMicrophoneIfEnabled()
             try configureHardware()
             guard try !routeChanged() else { throw CaptureFormatChanged() }
             // Keep the original meeting epoch. The resume gate only discards device warm-up.
             let resumeTime = mach_absolute_time()
             if let ring { MIRingSetStartTime(ring, resumeTime) }
-            if let micRing { MIRingSetStartTime(micRing, resumeTime) }
+            if let micInput { MIRingSetStartTime(micInput.ring, resumeTime) }
             recovery = nil
             DiagnosticLog.shared.record("capture.route_recovery.completed", fields: ["recording_id": writer?.recording.id.uuidString ?? "unknown"])
             callback?(.recovering(false))
@@ -200,43 +201,30 @@ public final class ProcessAudioCapture: @unchecked Sendable {
             DiagnosticLog.shared.failure("capture.route_recovery.retry", error: error, fields: ["recording_id": writer?.recording.id.uuidString ?? "unknown"])
         }
     }
-    private func startMicrophone() throws {
-        micDevices = try microphoneDevices()
-        // Ordinary shared input only; never create a VoiceProcessingIO unit.
-        let engine = AVAudioEngine()
-        let node = engine.inputNode
-        let format = node.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0, format.channelCount <= 2,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8192),
-              let ring = MIRingCreate(64, 65536) else {
-            throw MeetingError.message("麦克风格式不可用，请检查系统输入设备。")
+    private func startMicrophoneIfEnabled() {
+        guard microphoneEnabled, micInput == nil else { return }
+        do {
+            micInput = try MicrophoneInput(deviceUID: microphoneUID)
+            if let micInput {
+                DiagnosticLog.shared.record("capture.microphone.started", fields: [
+                    "channels": String(micInput.buffer.format.channelCount),
+                    "sample_rate": String(micInput.buffer.format.sampleRate)
+                ])
+            }
+        } catch {
+            microphoneEnabled = false
+            let warning = writer == nil
+                ? "麦克风未能启动，本次仅录制系统音频。\(error.localizedDescription)"
+                : "麦克风未能重新连接，之后仅录制系统音频。\(error.localizedDescription)"
+            microphoneWarning = warning
+            callback?(.microphoneUnavailable(warning))
+            DiagnosticLog.shared.failure("capture.microphone.unavailable", error: error,
+                                         fields: ["stage": writer == nil ? "start" : "recover"])
         }
-        micEngine = engine; micRing = ring; micBuffer = buffer
-        MIRingSetStartTime(ring, UInt64.max)
-        let context = MicrophoneRing(ring)
-        micContext = context
-        node.installTap(onBus: 0, bufferSize: 2048, format: format) { buffer, time in
-            _ = MIRingPush(context.pointer, buffer.audioBufferList, time.isHostTimeValid ? time.hostTime : 0)
-        }
-        engine.prepare()
-        try engine.start()
-        guard try microphoneDevices() == micDevices else {
-            throw MeetingError.message("启动时音频设备发生变化，请重新开始录音。")
-        }
-    }
-    private func microphoneDevices() throws -> [AudioObjectID] {
-        let selectors = [kAudioHardwarePropertyDefaultInputDevice]
-        return try selectors.map {
-            try Hardware.scalar(AudioObjectID(kAudioObjectSystemObject), $0, initial: AudioObjectID(0))
-        }
-    }
-    private func stopMicrophone() {
-        if let engine = micEngine { engine.inputNode.removeTap(onBus: 0); engine.stop() }
-        micEngine = nil; micDevices = []
     }
     private func drain() throws {
         if let ring, let buffer { try drain(ring, into: buffer, source: .application) }
-        if let micRing, let micBuffer { try drain(micRing, into: micBuffer, source: .microphone) }
+        if let micInput { try drain(micInput.ring, into: micInput.buffer, source: .microphone) }
         if let writer {
             let count = writer.recording.chunks.filter(\.isComplete).count
             if count != lastSnapshotCount { lastSnapshotCount = count; callback?(.snapshot(writer.recording)) }
@@ -285,12 +273,14 @@ public final class ProcessAudioCapture: @unchecked Sendable {
             if status == noErr { started = false }
             else { failure = "停止音频设备失败（\(status)）。请重启应用。" }
         }
-        stopMicrophone()
+        micInput?.stop()
         if error == nil, recovery == nil { do { try drain() } catch { failure = error.localizedDescription } }
         let cleanupErrors = cleanupHardware()
         if !cleanupErrors.isEmpty { failure = ([failure].compactMap { $0 } + cleanupErrors).joined(separator: "\n") }
         do {
-            if let recording = try writer?.finish(status: failure == nil ? .completed : .interrupted, note: failure) {
+            let notes = [microphoneWarning, failure].compactMap { $0 }
+            if let recording = try writer?.finish(status: failure == nil ? .completed : .interrupted,
+                                                   note: notes.isEmpty ? nil : notes.joined(separator: "\n")) {
                 DiagnosticLog.shared.record("capture.finished", fields: ["recording_id": recording.id.uuidString, "status": recording.status.rawValue])
                 callback?(.stopped(recording))
             }
@@ -304,8 +294,7 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         // Keep a healthy microphone open while rebuilding the output tap. Repeatedly
         // opening/closing Bluetooth input would bounce between HFP and A2DP profiles.
         if !preserveMicrophone || (try? microphoneRouteIsStable()) != true {
-            stopMicrophone()
-            micRing = nil; micBuffer = nil; micContext = nil
+            micInput = nil
         }
         var failures: [String] = []
         if device != 0 {
@@ -334,13 +323,6 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         buffer = nil
         return failures
     }
-}
-
-private final class MicrophoneRing: @unchecked Sendable {
-    let pointer: OpaquePointer
-    init(_ pointer: OpaquePointer) { self.pointer = pointer }
-    // A late engine callback retains this owner until it returns.
-    deinit { MIRingDestroy(pointer) }
 }
 
 private struct CaptureFormatChanged: LocalizedError {

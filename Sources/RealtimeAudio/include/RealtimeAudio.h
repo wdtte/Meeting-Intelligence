@@ -1,6 +1,7 @@
 #ifndef MEETING_REALTIME_AUDIO_H
 #define MEETING_REALTIME_AUDIO_H
 #include <CoreAudio/CoreAudio.h>
+#include <AudioToolbox/AudioToolbox.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -26,4 +27,14 @@ uint64_t MIRingDropped(MIRing * _Nonnull ring);
 OSStatus MIAudioIOProc(AudioObjectID device, const AudioTimeStamp * _Nonnull now,
                       const AudioBufferList * _Nonnull input, const AudioTimeStamp * _Nonnull inputTime,
                       AudioBufferList * _Nonnull output, const AudioTimeStamp * _Nonnull outputTime, void * _Nullable context);
+
+// AUHAL input-only render context. Destroy only after its AudioUnit is disposed.
+typedef struct MIMicrophoneRender MIMicrophoneRender;
+MIMicrophoneRender * _Nullable MIMicrophoneRenderCreate(AudioUnit _Nonnull unit, uint32_t channels, uint32_t maxFrames);
+void MIMicrophoneRenderDestroy(MIMicrophoneRender * _Nonnull render);
+MIRing * _Nonnull MIMicrophoneRenderRing(MIMicrophoneRender * _Nonnull render);
+OSStatus MIMicrophoneRenderError(MIMicrophoneRender * _Nonnull render);
+OSStatus MIMicrophoneInputProc(void * _Nonnull context, AudioUnitRenderActionFlags * _Nonnull flags,
+                               const AudioTimeStamp * _Nonnull time, UInt32 bus, UInt32 frames,
+                               AudioBufferList * _Nullable data);
 #endif

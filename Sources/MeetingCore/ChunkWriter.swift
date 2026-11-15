@@ -17,6 +17,8 @@ public final class ChunkWriter {
         var frames: AVAudioFramePosition = 0
         var lastEnd: Double?
         var index: Int = 0
+        var peak: Float = 0
+        var energy: Double = 0
         init(_ format: AVAudioFormat) { self.format = format }
     }
     private var tracks: [AudioSource: Track] = [:]
@@ -44,15 +46,19 @@ public final class ChunkWriter {
         let end = recording.chunks[track.index].offset + Double(track.frames) / track.format.sampleRate
         track.lastEnd = end
         var peak: Float = 0
+        var energy: Double = 0
         if let channels = buffer.floatChannelData {
             let count = Int(buffer.frameLength)
             for channel in 0..<Int(track.format.channelCount) {
                 for sample in 0..<count {
                     let value = track.format.isInterleaved ? channels[0][sample * Int(track.format.channelCount) + channel] : channels[channel][sample]
                     peak = max(peak, abs(value))
+                    if source == .microphone { energy += Double(value) * Double(value) }
                 }
             }
         }
+        track.peak = max(track.peak, peak)
+        track.energy += energy
         if Double(track.frames) / track.format.sampleRate >= segmentDuration { try closeChunk(track) }
         return AudioMeter(peak: min(1, peak), elapsed: end, savedDuration: recording.duration)
     }
@@ -87,6 +93,7 @@ public final class ChunkWriter {
             AVLinearPCMIsBigEndianKey: false
         ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
         track.frames = 0
+        track.peak = 0; track.energy = 0
     }
     private func closeChunk(_ track: Track) throws {
         guard track.file != nil else { return }
@@ -94,6 +101,20 @@ public final class ChunkWriter {
         let index = track.index
         let finalURL = try store.audioURL(recording: recording.id, fileName: recording.chunks[index].fileName)
         try FileManager.default.moveItem(at: finalURL.deletingPathExtension().appendingPathExtension("partial.wav"), to: finalURL)
+        if recording.chunks[index].audioSource == .microphone, track.frames > 0 {
+            let count = Double(track.frames) * Double(track.format.channelCount)
+            let gain = QuietMicrophoneGain.decibels(peak: track.peak, rms: sqrt(track.energy / count))
+            if gain > 0 {
+                let fields = ["recording_id": recording.id.uuidString, "chunk_id": recording.chunks[index].id.uuidString,
+                              "gain_db": String(format: "%.1f", gain)]
+                do {
+                    try QuietMicrophoneGain.apply(gain, to: finalURL)
+                    DiagnosticLog.shared.record("capture.microphone.gain_applied", fields: fields)
+                } catch {
+                    DiagnosticLog.shared.failure("capture.microphone.gain_failed", error: error, fields: fields)
+                }
+            }
+        }
         recording.chunks[index].duration = Double(track.frames) / track.format.sampleRate
         recording.chunks[index].isComplete = true
         try store.save(recording)

@@ -137,7 +137,7 @@ struct ContentView: View {
                         .font(.callout)
                     Text("录制所有应用播放的声音，合并为一条系统音频轨，不区分来源应用。")
                         .font(.callout).foregroundStyle(.secondary)
-                    Toggle("同时录制麦克风（系统默认输入设备）", isOn: $model.microphoneEnabled)
+                    MicrophoneControls(model: model)
                     Label("建议佩戴耳机，以获得最佳录音与转写质量，减少扬声器声音被麦克风重复收录。", systemImage: "headphones")
                         .font(.caption).foregroundStyle(.secondary)
                     Label("本地转写始终开启", systemImage: "checkmark.circle")
@@ -194,10 +194,12 @@ struct ContentView: View {
                     Text(model.inputStatus).font(.callout).foregroundStyle(.secondary)
                     if model.microphoneEnabled {
                         HStack {
-                            Image(systemName: "mic.fill")
+                            Image(systemName: model.microphoneWarning == nil ? "mic.fill" : "mic.slash")
                             Text(model.microphoneStatus)
-                            ProgressView(value: Double(model.microphonePeak)).frame(width: 100)
-                        }.font(.callout).foregroundStyle(.secondary)
+                            if model.microphoneWarning == nil {
+                                ProgressView(value: Double(model.microphonePeak)).frame(width: 100)
+                            }
+                        }.font(.callout).foregroundStyle(model.microphoneWarning == nil ? Color.secondary : .orange)
                     }
                     LevelWaveform(levels: model.levels).frame(height: 75).accessibilityLabel("系统音频音量 \(Int(model.peak * 100))%")
                     Text(model.savedDuration > 0 ? "已完成保存 \(AudioTimeline.clock(model.savedDuration))" : "首个音频片段写入后将显示保存进度")

@@ -416,7 +416,9 @@ func localOnlyRecordingCanAddCloudAfterRecordingWithoutRepeatingLocalWork(whileL
     for body in [
         #"{"output":{"task_status":"FAILED","code":"ASR_RESPONSE_HAVE_NO_WORDS","message":"ASR_RESPONSE_HAVE_NO_WORDS"}}"#,
         #"{"output":{"task_status":"SUCCEEDED","results":[{"subtask_status":"FAILED","code":"ASR_RESPONSE_HAVE_NO_WORDS"}]},"usage":{"input_tokens":7}}"#,
-        #"{"output":{"task_status":"FAILED","results":[{"subtask_status":"FAILED","code":"ASR_RESPONSE_HAVE_NO_WORDS"}]}}"#
+        #"{"output":{"task_status":"FAILED","results":[{"subtask_status":"FAILED","code":"ASR_RESPONSE_HAVE_NO_WORDS"}]}}"#,
+        #"{"output":{"task_status":"FAILED","code":"SUCCESS_WITH_NO_VALID_FRAGMENT"}}"#,
+        #"{"output":{"task_status":"SUCCEEDED","results":[{"subtask_status":"FAILED","code":"SUCCESS_WITH_NO_VALID_FRAGMENT"}]}}"#
     ] {
         let http = ScriptedHTTP([.init(body: body)])
         let provider = QwenTranscriptionProvider(configuration: .init(), apiKey: "fixture", transport: http, pollWait: { _ in })
@@ -476,7 +478,7 @@ func localOnlyRecordingCanAddCloudAfterRecordingWithoutRepeatingLocalWork(whileL
     try document.save(to: URL(fileURLWithPath: recording.transcriptPath!))
     // Existing jobs are query-only: no fixture audio files or upload replies are needed.
     let http = ScriptedHTTP([
-        .init(body: #"{"output":{"task_status":"FAILED","code":"ASR_RESPONSE_HAVE_NO_WORDS"}}"#),
+        .init(body: #"{"output":{"task_status":"FAILED","code":"SUCCESS_WITH_NO_VALID_FRAGMENT"}}"#),
         .init(body: #"{"output":{"task_status":"SUCCEEDED","results":[{"subtask_status":"SUCCEEDED","transcription_url":"https://result.oss-cn-beijing.aliyuncs.com/result.json"}]}}"#),
         .init(body: cloudText)
     ])

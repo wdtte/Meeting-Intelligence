@@ -9,7 +9,8 @@ let package = Package(
         .executable(name: "meeting", targets: ["MeetingCLI"])
     ],
     targets: [
-        .target(name: "RealtimeAudio", publicHeadersPath: "include", linkerSettings: [.linkedFramework("CoreAudio")]),
+        .target(name: "RealtimeAudio", publicHeadersPath: "include",
+                linkerSettings: [.linkedFramework("CoreAudio"), .linkedFramework("AudioToolbox")]),
         .target(name: "MeetingCore", dependencies: ["RealtimeAudio"], resources: [.process("Resources")]),
         .executableTarget(name: "MeetingIntelligence", dependencies: ["MeetingCore"]),
         .executableTarget(name: "MeetingCLI", dependencies: ["MeetingCore"]),

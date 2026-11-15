@@ -17,7 +17,7 @@ public final class DiagnosticLog: @unchecked Sendable {
     private let systemLog = Logger(subsystem: "local.meeting-intelligence.app", category: "diagnostics")
     private static let fields: Set<String> = ["recording_id", "chunk_id", "task_id", "request_id", "stage", "status", "code",
         "http_status", "error_domain", "error_code", "error_type", "field", "source", "region", "model", "attempt",
-        "version", "build", "commit", "build_time", "duration", "sample_rate", "channels", "segments", "no_speech"]
+        "version", "build", "commit", "build_time", "duration", "sample_rate", "channels", "segments", "no_speech", "gain_db"]
 
     init(directory: URL, maxBytes: Int = 2 * 1024 * 1024, enabled: Bool = true) {
         self.directory = directory; self.maxBytes = maxBytes; self.enabled = enabled
