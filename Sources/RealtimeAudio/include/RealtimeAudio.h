@@ -26,5 +26,4 @@ uint64_t MIRingDropped(MIRing * _Nonnull ring);
 OSStatus MIAudioIOProc(AudioObjectID device, const AudioTimeStamp * _Nonnull now,
                       const AudioBufferList * _Nonnull input, const AudioTimeStamp * _Nonnull inputTime,
                       AudioBufferList * _Nonnull output, const AudioTimeStamp * _Nonnull outputTime, void * _Nullable context);
-int MIProcessPath(int pid, void * _Nonnull buffer, uint32_t size);
 #endif

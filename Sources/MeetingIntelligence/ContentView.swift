@@ -129,28 +129,13 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 9) {
                     Text("每一场对话，都值得留下。").font(.system(size: 27, weight: .semibold))
-                    Text("选择一个应用，开始记录会议音频。").foregroundStyle(.secondary)
+                    Text("录制这台 Mac 的系统声音，记录每一场会议。").foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 22) {
                     Label("新录制", systemImage: "record.circle").font(.headline)
-                    HStack(alignment: .center, spacing: 12) {
-                        Text("音频来源")
-                        ApplicationPicker(model: model)
-                            .frame(width: 220)
-                        Button { model.refreshApplications() } label: { Image(systemName: "arrow.clockwise") }
-                            .help("刷新正在运行的应用").accessibilityLabel("刷新应用列表")
-                        Spacer(minLength: 0)
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle("显示所有运行中的应用", isOn: $model.showAllApplications)
-                            .toggleStyle(.checkbox)
-                            .onChange(of: model.showAllApplications) { model.refreshApplications() }
-                        Text(model.outputActiveApplicationIDs == nil
-                             ? "暂时无法检测音频活动，已显示所有运行中的应用。"
-                             : "优先显示常用会议应用，其它应用仅在音频输出活跃时显示。找不到应用时可展开全部。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text("录制所选应用及其已发现的辅助进程。浏览器以整个应用为单位，不区分标签页。")
+                    Label("音频来源：系统音频", systemImage: "speaker.wave.2")
+                        .font(.callout)
+                    Text("录制所有应用播放的声音，合并为一条系统音频轨，不区分来源应用。")
                         .font(.callout).foregroundStyle(.secondary)
                     Toggle("同时录制麦克风（系统默认输入设备）", isOn: $model.microphoneEnabled)
                     Label("建议佩戴耳机，以获得最佳录音与转写质量，减少扬声器声音被麦克风重复收录。", systemImage: "headphones")
@@ -175,16 +160,16 @@ struct ContentView: View {
                         Button { Task { await model.start() } } label: {
                             Label("开始录音", systemImage: "record.circle").padding(.horizontal, 12).padding(.vertical, 5)
                         }.buttonStyle(.borderedProminent).tint(.red)
-                            .disabled(model.target == nil || model.store == nil || model.libraryError != nil)
+                            .disabled(model.store == nil || model.libraryError != nil)
                     }
                 }.padding(28).card()
-                Label("首次使用会请求系统音频录制权限。请先打开会议应用，并在录制后确认下方音量有变化。", systemImage: "info.circle")
+                Label("首次使用会请求系统音频录制权限。录制后请确认音量有变化。", systemImage: "info.circle")
                     .font(.callout).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(model.useCloudTranscription ? "本地字幕 + Qwen 云端精校" : "本地录音与转写").font(.callout.weight(.medium))
                     Text(model.useCloudTranscription
-                         ? "应用与麦克风分轨保存在本机；录制中约每 10 秒更新本地字幕。停止后上传至百炼精校，成功结果替换本地字幕，支持点击回听。"
-                         : "应用与麦克风分轨保存；字幕约每 10 秒更新，结束后补齐最后一段。语音模型仅在本机处理音频。")
+                         ? "系统音频与麦克风分轨保存在本机；录制中约每 10 秒更新本地字幕。停止后上传至百炼精校，成功结果替换本地字幕，支持点击回听。"
+                         : "系统音频与麦克风分轨保存；字幕约每 10 秒更新，结束后补齐最后一段。语音模型仅在本机处理音频。")
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }.padding(40).frame(maxWidth: 820)
@@ -196,7 +181,7 @@ struct ContentView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("新的会议录音").font(.title2.weight(.semibold))
-                        Label(model.captureName, systemImage: "app").foregroundStyle(.secondary)
+                        Label(model.captureName, systemImage: "speaker.wave.2").foregroundStyle(.secondary)
                     }
                     Spacer()
                     Label(model.state == .recording ? "录制中" : model.state == .preparing ? "准备中" : "保存中", systemImage: "record.circle.fill")
@@ -214,7 +199,7 @@ struct ContentView: View {
                             ProgressView(value: Double(model.microphonePeak)).frame(width: 100)
                         }.font(.callout).foregroundStyle(.secondary)
                     }
-                    LevelWaveform(levels: model.levels).frame(height: 75).accessibilityLabel("应用音频音量 \(Int(model.peak * 100))%")
+                    LevelWaveform(levels: model.levels).frame(height: 75).accessibilityLabel("系统音频音量 \(Int(model.peak * 100))%")
                     Text(model.savedDuration > 0 ? "已完成保存 \(AudioTimeline.clock(model.savedDuration))" : "首个音频片段写入后将显示保存进度")
                         .font(.caption).foregroundStyle(.secondary)
                     Button { Task { await model.stop() } } label: {
@@ -256,7 +241,7 @@ struct ContentView: View {
                 }
                 HStack(spacing: 16) {
                     Label(recording.startedAt.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
-                    Label(recording.applicationName, systemImage: "app")
+                    Label(recording.applicationName, systemImage: recording.bundleIdentifier.isEmpty ? "speaker.wave.2" : "app")
                     Label(AudioTimeline.clock(recording.duration), systemImage: "clock").fixedSize()
                 }.font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 if model.deletingRecordingID == recording.id {

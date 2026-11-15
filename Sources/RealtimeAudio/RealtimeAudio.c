@@ -90,5 +90,3 @@ OSStatus MIAudioIOProc(AudioObjectID device, const AudioTimeStamp *now,
     MIRingPush(context, input, hostTime);
     return noErr;
 }
-#include <libproc.h>
-int MIProcessPath(int pid, void *buffer, uint32_t size) { return proc_pidpath(pid, buffer, size); }

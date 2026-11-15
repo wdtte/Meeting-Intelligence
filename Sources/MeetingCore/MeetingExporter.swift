@@ -16,7 +16,7 @@ public enum MeetingExportKind: String, CaseIterable, Sendable {
     public var explanation: String {
         switch self {
         case .transcriptAndAudio: "导出单个 HTML 文件，内含转写和合并音频。可离线查看、播放及点击字幕回听，文件大小比单独音频略大。"
-        case .audio: "应用声音与麦克风将按原始时间线混合为一个 M4A 文件。"
+        case .audio: "系统音频与麦克风将按原始时间线混合为一个 M4A 文件。"
         case .transcript: "导出包含发言来源和时间戳的 HTML 文件，可在浏览器中离线阅读和搜索，不包含音频。"
         }
     }
@@ -109,7 +109,7 @@ enum TranscriptHTMLWriter {
                 if let audioURL {
                     try write("""
                     <section class="player" aria-label="会议音频">
-                      <div class="player-heading"><strong>会议音频</strong><span>应用声音与麦克风已合并</span></div>
+                      <div class="player-heading"><strong>会议音频</strong><span>系统音频与麦克风已合并</span></div>
                       <audio id="audio" controls preload="metadata" aria-label="会议录音" src="data:audio/mp4;base64,
                     """)
                     try writeBase64(audioURL, to: output)

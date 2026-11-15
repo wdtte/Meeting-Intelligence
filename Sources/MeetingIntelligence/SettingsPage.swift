@@ -25,7 +25,7 @@ struct SettingsPage: View {
                     Toggle("同时录制麦克风", isOn: $model.microphoneEnabled)
                     Label("建议佩戴耳机，以获得最佳录音与转写质量，减少扬声器声音被麦克风重复收录。", systemImage: "headphones")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("转写角色固定为应用音频与麦克风，按采集来源区分。")
+                    Text("转写角色固定为系统音频与麦克风，按采集来源区分。")
                         .font(.caption).foregroundStyle(.secondary)
                     Label("本地转写始终开启", systemImage: "checkmark.circle")
                         .font(.callout).foregroundStyle(.secondary)

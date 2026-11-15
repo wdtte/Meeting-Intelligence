@@ -71,7 +71,7 @@ struct MeetingPlaybackBar: View {
 
             Menu {
                 sourceOption("混听", source: nil)
-                sourceOption("应用音频", source: .application)
+                sourceOption("系统音频", source: .application)
                 sourceOption("麦克风", source: .microphone)
                     .disabled(!recording.chunks.contains { $0.audioSource == .microphone })
             } label: {

@@ -1,9 +1,10 @@
 import Foundation
 
 public enum AudioSource: String, Codable, Sendable, CaseIterable {
-    // Transcript roles are these two capture sources, never inferred speakers.
+    // Keep the legacy `application` wire value for system audio and older recordings.
+    // These are capture sources, never inferred speakers.
     case application, microphone
-    public var label: String { self == .application ? "应用音频" : "麦克风" }
+    public var label: String { self == .application ? "系统音频" : "麦克风" }
 }
 
 public enum RecordingStatus: String, Codable, Sendable {
@@ -40,6 +41,12 @@ public struct Recording: Identifiable, Codable, Sendable, Equatable {
     public var microphoneCaptureMode: MicrophoneCaptureMode?
     public var duration: Double { chunks.filter(\.isComplete).map(\.end).max() ?? 0 }
     public var audioDuration: Double { chunks.filter(\.isComplete).reduce(0) { $0 + $1.duration } }
+
+    /// Global audio has no originating application. Retain the legacy metadata
+    /// fields so existing manifests and the read-only CLI remain compatible.
+    public static func systemAudio(title: String) -> Recording {
+        Recording(title: title, applicationName: AudioSource.application.label, bundleIdentifier: "")
+    }
 
     public init(title: String, applicationName: String, bundleIdentifier: String) {
         self.title = title; self.applicationName = applicationName; self.bundleIdentifier = bundleIdentifier

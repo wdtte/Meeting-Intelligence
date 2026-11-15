@@ -32,18 +32,14 @@ public final class ProcessAudioCapture: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var writer: ChunkWriter?
     private var buffer: AVAudioPCMBuffer?
-    private var target: TargetApplication?
-    private var description: CATapDescription?
-    private var processObjects: [AudioObjectID] = []
     private var epoch: UInt64 = 0
-    private var lastCheck: TimeInterval = 0
     private var lastMeter: TimeInterval = 0
     private var started = false
     private var callback: (@Sendable (CaptureEvent) -> Void)?
 
     public init() {}
 
-    public func start(target: TargetApplication, recording: Recording, store: RecordingStore, microphone: Bool = false,
+    public func start(recording: Recording, store: RecordingStore, microphone: Bool = false,
                       onEvent: @escaping @Sendable (CaptureEvent) -> Void) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
@@ -61,7 +57,7 @@ public final class ProcessAudioCapture: @unchecked Sendable {
                     // Opening a Bluetooth microphone can change the output profile.
                     // Establish input first, then capture the resulting output format.
                     if microphone { try self.startMicrophone() }
-                    try self.configureHardware(target: target)
+                    try self.configureHardware()
                     guard let format = self.buffer?.format else { throw CaptureFormatChanged() }
                     self.writer = try ChunkWriter(recording: recording, store: store, format: format)
                     // Hardware startup can block. Discard
@@ -77,7 +73,7 @@ public final class ProcessAudioCapture: @unchecked Sendable {
                     let message = ([error.localizedDescription] + cleanupErrors).joined(separator: "\n")
                     do { _ = try self.writer?.finish(status: .failed, note: message) }
                     catch { onEvent(.failure("录音启动失败，且无法更新保存状态：\(error.localizedDescription)")) }
-                    self.writer = nil; self.callback = nil; self.target = nil
+                    self.writer = nil; self.callback = nil
                     continuation.resume(throwing: MeetingError.message(message))
                 }
             }
@@ -91,20 +87,11 @@ public final class ProcessAudioCapture: @unchecked Sendable {
             }
         }
     }
-    private func configureHardware(target: TargetApplication) throws {
+    private func configureHardware() throws {
         outputDevice = try defaultOutputDevice()
         guard outputDevice != 0 else { throw MeetingError.message("正在等待可用的音频输出设备。") }
-        self.target = target
-        processObjects = try Hardware.processObjects(for: target)
-        let description = CATapDescription(stereoMixdownOfProcesses: processObjects)
-        description.name = "Meeting Intelligence · \(target.name)"
-        description.uuid = UUID()
-        description.isPrivate = true
-        description.muteBehavior = .unmuted
-        description.bundleIDs = [target.bundleIdentifier]
-        description.isProcessRestoreEnabled = true
-        self.description = description
-        try Hardware.check(AudioHardwareCreateProcessTap(description, &tap), "创建应用音频采集")
+        let description = Hardware.globalTapDescription()
+        try Hardware.check(AudioHardwareCreateProcessTap(description, &tap), "创建系统音频采集")
         let stream = try Hardware.scalar(tap, kAudioTapPropertyFormat, initial: AudioStreamBasicDescription())
         var asbd = stream
         guard let format = AVAudioFormat(streamDescription: &asbd), format.commonFormat == .pcmFormatFloat32,
@@ -126,8 +113,8 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         self.ring = ring
         MIRingSetStartTime(ring, UInt64.max)
         try Hardware.check(AudioDeviceCreateIOProcID(device, MIAudioIOProc, UnsafeMutableRawPointer(ring), &ioProc), "创建音频回调")
-        try Hardware.check(AudioDeviceStart(device, ioProc), "开始应用音频录制")
-        started = true; lastCheck = 0; lastMeter = 0
+        try Hardware.check(AudioDeviceStart(device, ioProc), "开始系统音频录制")
+        started = true; lastMeter = 0
     }
     private func startTimer() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -167,22 +154,6 @@ public final class ProcessAudioCapture: @unchecked Sendable {
             }
             if changed { try beginRecovery(); return }
             try drain()
-            let now = ProcessInfo.processInfo.systemUptime
-            if now - lastCheck > 1, let target {
-                lastCheck = now
-                guard kill(target.processID, 0) == 0 else {
-                    finish(error: "所选应用已退出。已保存收到的音频，请重新选择应用开始录音。")
-                    return
-                }
-                let current = try Hardware.processObjects(for: target)
-                if current != processObjects, let description {
-                    description.processes = current
-                    var value = Unmanaged.passUnretained(description).toOpaque()
-                    var address = Hardware.address(kAudioTapPropertyDescription)
-                    try Hardware.check(AudioObjectSetPropertyData(tap, &address, 0, nil, UInt32(MemoryLayout<UnsafeMutableRawPointer>.size), &value), "更新应用音频进程")
-                    processObjects = current
-                }
-            }
         } catch is CaptureFormatChanged {
             do { try beginRecovery() } catch { finish(error: error.localizedDescription) }
         } catch { finish(error: error.localizedDescription) }
@@ -203,7 +174,6 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         if !errors.isEmpty { recoveryError = errors.joined(separator: "\n") }
     }
     private func recoverIfDue() {
-        guard let target else { return }
         switch recovery?.advance(now: ProcessInfo.processInfo.systemUptime) {
         case .wait, .none: return
         case .expired:
@@ -212,15 +182,11 @@ public final class ProcessAudioCapture: @unchecked Sendable {
             return
         case .retry: break
         }
-        guard kill(target.processID, 0) == 0 else {
-            finish(error: "所选应用已退出，已保存收到的音频。")
-            return
-        }
         do {
             let errors = cleanupHardware(preserveMicrophone: true)
             guard errors.isEmpty else { throw MeetingError.message(errors.joined(separator: "\n")) }
             if microphoneEnabled, micEngine == nil { try startMicrophone() }
-            try configureHardware(target: target)
+            try configureHardware()
             guard try !routeChanged() else { throw CaptureFormatChanged() }
             // Keep the original meeting epoch. The resume gate only discards device warm-up.
             let resumeTime = mach_absolute_time()
@@ -329,7 +295,7 @@ public final class ProcessAudioCapture: @unchecked Sendable {
                 callback?(.stopped(recording))
             }
         } catch { failure = "无法完成保存：\(error.localizedDescription)。已落盘片段保留在录音目录中。" }
-        writer = nil; target = nil; recovery = nil
+        writer = nil; recovery = nil
         if let failure { callback?(.failure(failure)) }
         callback = nil
         return failure
@@ -363,9 +329,9 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         if tap != 0 {
             let status = AudioHardwareDestroyProcessTap(tap)
             if status == noErr { tap = 0 }
-            else { failures.append("释放应用音频采集失败（\(status)）。请重启应用。") }
+            else { failures.append("释放系统音频采集失败（\(status)）。请重启应用。") }
         }
-        buffer = nil; description = nil
+        buffer = nil
         return failures
     }
 }
