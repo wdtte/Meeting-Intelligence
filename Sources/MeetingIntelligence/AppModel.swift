@@ -12,14 +12,6 @@ final class AppModel {
     var page: Page = .meetings
     var storageSettings: StorageSettings?
     var historyWarnings: [String] = []
-    var applications: [TargetApplication] = []
-    var outputActiveApplicationIDs: Set<String>?
-    var showAllApplications = false
-    var applicationChoices: [TargetApplication] {
-        TargetApplication.choices(from: applications, outputActiveIDs: outputActiveApplicationIDs,
-                                  selectedID: targetID, showAll: showAllApplications)
-    }
-    var targetID = ""
     var recordings: [Recording] = []
     var selectedID: UUID?
     var state: State = .idle
@@ -272,12 +264,11 @@ final class AppModel {
     @ObservationIgnored private var ticker: Task<Void, Never>?
     var isBusy: Bool { state != .idle }
     var selectedRecording: Recording? { recordings.first { $0.id == selectedID } }
-    var target: TargetApplication? { applications.first { $0.id == targetID } }
     var inputStatus: String {
         guard state == .recording else { return "等待开始" }
         if recoveringAudioDevice { return "音频设备已切换，正在恢复录音…" }
-        guard let lastAudioAt else { return "等待应用音频 · 请在所选应用中播放声音" }
-        return ProcessInfo.processInfo.systemUptime - lastAudioAt > 4 ? "暂未检测到声音 · 请检查音源与权限" : "正在接收应用音频"
+        guard let lastAudioAt else { return "等待系统音频 · 请播放会议或其他声音" }
+        return ProcessInfo.processInfo.systemUptime - lastAudioAt > 4 ? "暂未检测到声音 · 请检查音源与权限" : "正在接收系统音频"
     }
     init() {
         do {
@@ -289,7 +280,6 @@ final class AppModel {
             try reload(recover: true)
         }
         catch { libraryError = error.localizedDescription }
-        refreshApplications()
         refreshCredentialStatus()
         Task { [weak self] in await self?.prepareSpeechModel() }
         ticker = Task { [weak self] in
@@ -305,11 +295,6 @@ final class AppModel {
                 }
             }
         }
-    }
-    func refreshApplications() {
-        applications = TargetApplication.running()
-        outputActiveApplicationIDs = TargetApplication.outputActiveIDs(in: applications)
-        if !applications.contains(where: { $0.id == targetID }) { targetID = "" }
     }
     func reload(recover: Bool = false) throws {
         guard let settings = storageSettings, let store else { return }
@@ -347,12 +332,10 @@ final class AppModel {
     }
     func start() async {
         guard state == .idle, deletingRecordingID == nil else { return }
-        refreshApplications()
-        guard let store, let target, libraryError == nil else { return }
+        guard let store, libraryError == nil else { return }
         page = .meetings
         state = .preparing; playback.stop(); errorMessage = nil
-        var recording = Recording(title: "\(target.name) · \(Date().formatted(date: .abbreviated, time: .shortened))",
-                                  applicationName: target.name, bundleIdentifier: target.bundleIdentifier)
+        var recording = Recording.systemAudio(title: "会议录音 · \(Date().formatted(date: .abbreviated, time: .shortened))")
         if let settings = storageSettings {
             recording.transcriptPath = settings.transcriptDirectory.appendingPathComponent("\(recording.id).json").path
             recording.transcriptionLocale = transcriptionLocale
@@ -361,7 +344,7 @@ final class AppModel {
             do { recording.cloudTranscription = try validatedCloudConfiguration() }
             catch { state = .idle; errorMessage = error.localizedDescription; return }
         }
-        activeRecordingID = recording.id; captureName = target.name
+        activeRecordingID = recording.id; captureName = AudioSource.application.label
         recoveringAudioDevice = false
         elapsed = 0; savedDuration = 0; peak = 0; lastAudioAt = nil
         microphonePeak = 0; microphoneLastAudioAt = nil; transcriptionNotice = nil
@@ -369,9 +352,9 @@ final class AppModel {
         do {
             if microphoneEnabled {
                 let granted = await AVCaptureDevice.requestAccess(for: .audio)
-                guard granted else { throw MeetingError.message("麦克风权限未开启。请在系统设置中允许，或关闭麦克风选项后录制应用音频。") }
+                guard granted else { throw MeetingError.message("麦克风权限未开启。请在系统设置中允许，或关闭麦克风选项后录制系统音频。") }
             }
-            try await capture.start(target: target, recording: recording, store: store, microphone: microphoneEnabled) { [weak self] event in
+            try await capture.start(recording: recording, store: store, microphone: microphoneEnabled) { [weak self] event in
                 Task { @MainActor in self?.receive(event) }
             }
             startedAt = ProcessInfo.processInfo.systemUptime
