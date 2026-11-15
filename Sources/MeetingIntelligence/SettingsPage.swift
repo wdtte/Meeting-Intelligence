@@ -63,6 +63,9 @@ struct SettingsPage: View {
                             Button("前往百炼创建 API Key ↗") { model.openQwenConsole() }
                         }
                         Text(model.credentialStatus).font(.caption).foregroundStyle(.secondary)
+                        Button("授权钥匙串访问…") { model.authorizeAPIKey() }.disabled(!model.apiKeySaved)
+                        Text("日常转写不会弹出密码框。首次授权请选择系统提示中的“始终允许”，以记住对本应用的访问许可；钥匙串锁定时仍需解锁。")
+                            .font(.caption).foregroundStyle(.secondary)
                         Toggle("跳过整段静音，减少云端用量", isOn: $model.skipCloudSilence)
                         Text("只跳过整段接近零音量的片段；轻声、背景噪声及片段内的停顿仍会上传。原录音和回听时间轴保持完整。双轨按各自上传的音频分别计量。")
                             .font(.caption).foregroundStyle(.secondary)

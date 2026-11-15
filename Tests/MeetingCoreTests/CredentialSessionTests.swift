@@ -1,7 +1,19 @@
 import Foundation
 import Synchronization
 import Testing
+import Security
 @testable import MeetingCore
+
+@Test func credentialReadsRequireExplicitOptInToSystemPrompts() {
+    for region in [QwenRegion.beijing, .singapore] {
+        let silent = TranscriptionCredentials.readQuery(region: region)
+        let authorized = TranscriptionCredentials.readQuery(region: region, allowInteraction: true)
+        #expect(silent[kSecUseAuthenticationUI as String] as? String == kSecUseAuthenticationUIFail as String)
+        #expect(authorized[kSecUseAuthenticationUI as String] as? String == kSecUseAuthenticationUIAllow as String)
+        #expect(silent[kSecAttrAccount as String] as? String == "qwen.\(region.rawValue)")
+        #expect(silent[kSecReturnData as String] as? Bool == true)
+    }
+}
 
 @Test func credentialSessionReusesAuthorizationAndSeparatesAccounts() async {
     let cache = CredentialSessionCache()
