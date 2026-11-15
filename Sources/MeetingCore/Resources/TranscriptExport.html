@@ -2,84 +2,212 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; media-src data:; script-src 'nonce-{{NONCE}}'; style-src 'nonce-{{NONCE}}'; base-uri 'none'; form-action 'none'">
 <title>{{TITLE}} · 会议记录</title>
 <style nonce="{{NONCE}}">
-:root { color-scheme: light dark; --bg:#f6f6f4; --surface:#fff; --text:#242424; --muted:#626262; --border:#dededb; --active:#eeeeeb; --focus:#333; }
-* { box-sizing:border-box; }
-body { margin:0; color:var(--text); background:var(--bg); font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; }
-main { max-width:900px; margin:auto; padding:48px 28px 64px; }
-.brand { display:flex; align-items:center; gap:12px; font-size:12px; font-weight:650; letter-spacing:.1em; color:var(--muted); }
-.mark { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; background:var(--active); border-radius:10px; letter-spacing:2px; font-size:20px; color:var(--text); }
-h1 { font-size:clamp(25px,4vw,38px); line-height:1.35; font-weight:650; letter-spacing:-.035em; margin:24px 0 14px; overflow-wrap:anywhere; }
-.metadata { display:flex; flex-wrap:wrap; gap:8px 20px; color:var(--muted); font-size:14px; }
-.notice { color:var(--muted); font-size:13px; margin:14px 0 0; }
-header { margin-bottom:28px; }
-.player { position:sticky; top:12px; z-index:2; background:var(--surface); padding:20px 24px; border:1px solid var(--border); border-radius:16px; box-shadow:0 4px 16px #00000006; margin-bottom:28px; }
-.player-heading, .player-options { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px 20px; font-size:13px; }
-.player-heading span { color:var(--muted); }
-audio { display:block; width:100%; margin:14px 0 8px; }
-.player-options label { display:inline-flex; align-items:center; gap:8px; min-height:36px; }
-select { padding:5px 8px; border:1px solid var(--border); border-radius:6px; font:inherit; background:var(--surface); color:var(--text); }
-input[type=checkbox] { width:16px; height:16px; accent-color:var(--text); }
-.transcript { background:var(--surface); border:1px solid var(--border); border-radius:16px; overflow:hidden; }
-.transcript-header { padding:24px 24px 16px; border-bottom:1px solid var(--border); }
-h2 { font-size:18px; margin:0 0 4px; font-weight:650; }
-.hint { font-size:13px; color:var(--muted); margin:0 0 18px; }
-.search-row { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; font-size:13px; }
-.search-row label { font-weight:550; }
-input[type=search] { min-width:0; flex:1; min-height:42px; padding:8px 12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; font:inherit; color:var(--text); }
-#count { color:var(--muted); white-space:nowrap; }
-.segment { display:grid; grid-template-columns:100px minmax(0,1fr); gap:20px; padding:20px 24px; border-bottom:1px solid var(--border); scroll-margin-top:250px; }
-.segment:last-child { border-bottom:0; }
-.segment.is-active { background:var(--active); box-shadow:inset 3px 0 0 var(--text); }
-.segment-meta { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
-.timestamp { font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--text); font-variant-numeric:tabular-nums; display:inline-flex; align-items:center; min-height:32px; }
-button.timestamp { cursor:pointer; background:var(--bg); border:1px solid var(--border); border-radius:7px; padding:4px 9px; min-height:36px; }
-button.timestamp:hover { background:var(--active); }
-.source { color:var(--muted); font-size:12px; }
-.segment-text { margin:3px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
-.has-audio .segment-text { cursor:pointer; }
-.empty { margin:0; padding:32px 24px; color:var(--muted); text-align:center; }
-footer { margin-top:24px; color:var(--muted); font-size:12px; text-align:center; }
-:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
-[hidden] { display:none; }
-@media (prefers-color-scheme:dark) { :root { --bg:#191919; --surface:#222; --text:#ededeb; --muted:#b0b0ac; --border:#3c3c39; --active:#333330; --focus:#ddd; } }
-@media (max-width:540px) { main { padding:24px 14px 36px; } .player { top:6px; padding:16px; } .player-heading span { display:none; } .transcript-header { padding:20px 16px 16px; } .segment { grid-template-columns:1fr; gap:8px; padding:18px 16px; } .segment-meta { flex-direction:row; align-items:center; gap:12px; } button.timestamp { min-height:44px; } .search-row label { width:100%; } }
-@media print { :root { --bg:#fff; --surface:#fff; --text:#000; --muted:#555; --border:#ddd; } main { max-width:none; padding:0; } .player, .search-row, #no-results { display:none; } .segment { break-inside:avoid; } .segment[hidden] { display:grid; } .segment.is-active { background:transparent; box-shadow:none; } }
+:root {
+  color-scheme: light dark;
+  --bg: #fff;
+  --text: #202124;
+  --muted: #606166;
+  --line: #dcdce1;
+  --fill: #f2f2f5;
+  --active: #ededf1;
+  --wave: #989aa3;
+  --glass: #f8f8f9ef;
+  --focus: #005fc7;
+  --error: #a32825;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+  font: 1rem/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+}
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.page { width: min(100%, 940px); margin-inline: auto; padding: 20px 16px 24px; }
+.page, .player-dock {
+  padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+}
+.meeting-header { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.brand, .label { display: inline-flex; align-items: center; gap: 6px; }
+.brand { gap: 8px; color: var(--muted); font-size: .8125rem; font-weight: 600; }
+.mark { display: grid; place-items: center; width: 28px; height: 28px; background: var(--fill); border-radius: 8px; color: var(--text); }
+.icon { width: 1em; height: 1em; flex: none; }
+h1 { margin: 14px 0 10px; font-size: 1.625rem; line-height: 1.25; font-weight: 650; overflow-wrap: anywhere; }
+.metadata { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.metadata, .notice, .hint, .count { color: var(--muted); font-size: .8125rem; }
+.metadata span { min-width: 0; overflow-wrap: anywhere; }
+.notice { margin: 10px 0 0; }
+.transcript-header { display: grid; gap: 12px; padding: 16px 0 12px; }
+.transcript-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+h2 { font-size: 1.0625rem; margin: 0; font-weight: 650; }
+.hint { margin: 2px 0 0; }
+.search-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.search-row .icon { color: var(--muted); }
+input[type=search] {
+  width: 100%; min-width: 0; min-height: 44px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 8px; font: inherit;
+  color: var(--text); background: var(--fill);
+}
+input[type=search]::placeholder { color: var(--muted); }
+.segment { position: relative; display: grid; gap: 4px 16px; padding: 10px 8px 14px; margin-bottom: 4px; border-radius: 10px; }
+.segment.is-active { background: var(--active); }
+.segment.is-active::before {
+  content: ""; position: absolute; inset-block: 12px; inset-inline-start: 0;
+  width: 2px; border-radius: 2px; background: var(--muted);
+}
+.segment-meta, .segment-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-width: 0; }
+.timestamp, .playback-time { font: .75rem/1.4 var(--mono); color: var(--muted); }
+span.timestamp, button.timestamp { display: inline-flex; align-items: center; justify-self: start; }
+button.timestamp {
+  min-width: 44px; min-height: 44px; padding: 0 6px;
+  border: 0; border-radius: 6px; background: var(--fill); cursor: pointer;
+}
+.source { color: var(--muted); font-size: .75rem; font-weight: 550; }
+.engine { max-width: 100%; padding: 1px 7px; border-radius: 12px; color: var(--muted); background: var(--fill); font-size: .6875rem; overflow-wrap: anywhere; }
+.segment-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.has-player .segment-text { cursor: pointer; }
+.empty, footer { color: var(--muted); text-align: center; }
+.empty { margin: 0; padding: 28px 0; }
+footer { margin-top: 24px; font-size: .75rem; }
+.player-dock { padding-block: 6px max(10px, env(safe-area-inset-bottom)); }
+.player {
+  position: relative; max-width: 840px; margin: 0 auto; padding: 0 6px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--glass);
+  box-shadow: 0 3px 14px #0001;
+}
+audio { display: block; width: 100%; }
+.has-player {
+  display: grid; grid-template-rows: minmax(0, 1fr) auto;
+  height: 100vh; height: 100dvh;
+}
+.has-player .reader { min-height: 0; overflow: auto; scroll-padding-block: 12px; }
+.player-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: center; height: 58px; }
+.transport { display: flex; align-items: center; }
+.timeline { min-width: 0; position: relative; }
+.playback-time { position: absolute; inset-block-start: 0; inset-inline-end: 0; white-space: nowrap; pointer-events: none; font-size: .6875rem; }
+.seek-track { position: relative; height: 44px; }
+.seek-track canvas {
+  display: block; position: absolute; inset: 18px 6px auto; width: calc(100% - 12px); height: 16px;
+  color: var(--text); pointer-events: none;
+}
+input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent-color: var(--text); cursor: pointer; }
+.waveform-ready input[type=range] { position: relative; appearance: none; background: transparent; }
+.waveform-ready input[type=range]::-webkit-slider-runnable-track { background: transparent; border: 0; }
+.waveform-ready input[type=range]::-moz-range-track { background: transparent; border: 0; }
+.waveform-ready input[type=range]::-webkit-slider-thumb { appearance: none; width: 12px; height: 16px; opacity: 0; }
+.waveform-ready input[type=range]::-moz-range-thumb { width: 12px; height: 16px; opacity: 0; }
+.transport button, #speed {
+  min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 10px;
+  background: transparent; color: var(--text); font: inherit; cursor: pointer;
+}
+.transport button { display: grid; place-items: center; }
+.transport button .icon { width: 20px; height: 20px; }
+#play .icon { width: 22px; height: 22px; }
+#speed { width: 44px; appearance: none; text-align: center; font-size: .75rem; font-weight: 600; }
+.player-error {
+  position: absolute; inset: auto 0 calc(100% + 6px); margin: 0; padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--error); font-size: .8125rem;
+}
+@media (hover: hover) {
+  .has-player .segment:hover, button.timestamp:hover,
+  .transport button:hover, #speed:hover { background: var(--fill); }
+  .has-player .segment.is-active:hover { background: var(--active); }
+}
+@media (min-width: 40rem) {
+  .page { padding: 28px 32px; }
+  .meeting-header { padding-bottom: 22px; }
+  .transcript-header { grid-template-columns: minmax(0, 1fr) minmax(180px, 250px); align-items: center; }
+  input[type=search] { font-size: .875rem; min-height: 36px; }
+  .segment { grid-template-columns: minmax(3.625rem, auto) minmax(0, 1fr); padding: 14px 12px; }
+  .segment-meta { display: contents; }
+  .segment-text { grid-column: 2; font-size: .9375rem; }
+  .timestamp { align-self: start; grid-column: 1; grid-row: 1 / span 2; }
+  button.timestamp { min-height: 32px; margin-top: -7px; }
+  .player-dock { padding-block: 6px 16px; }
+  .player { padding-inline: 16px; }
+  .player-controls { gap: 16px; }
+}
+@media (max-width: 20rem) {
+  .player-dock { padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right)); }
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e; --text: #e9e9ed; --muted: #b1b1b8; --line: #3d3d42;
+    --fill: #2b2b2f; --active: #343438; --wave: #72727c; --glass: #252528f5; --focus: #79b8ff; --error: #ff9a96;
+  }
+}
+@media print {
+  :root { --bg: #fff; --text: #000; --muted: #555; --line: #ddd; --fill: #fff; }
+  body.has-player { display: block; height: auto; }
+  .has-player .reader { overflow: visible; }
+  .page { width: auto; margin: 0; padding: 0; }
+  .player-dock, .search-row, #no-results { display: none; }
+  .segment { break-inside: avoid; }
+  .segment[hidden] { display: grid !important; }
+  .segment.is-active { background: none; }
+  .segment.is-active::before { display: none; }
+}
 </style>
 </head>
 <body>
-<main>
-<header>
-  <div class="brand"><span class="mark" aria-hidden="true">ııı</span>MEETING INTELLIGENCE</div>
-  <h1>{{TITLE}}</h1>
-  <div class="metadata"><span>{{DATE}}</span><span>{{APPLICATION}}</span><span>{{COUNT}} 段发言</span></div>
-  <p class="notice">{{NOTICE}}</p>
-</header>
+<svg aria-hidden="true" width="0" height="0" hidden xmlns="http://www.w3.org/2000/svg">
+  <symbol id="wave" viewBox="0 0 20 20"><path d="M2 8v4m4-7v10m4-13v16m4-12v8m4-6v4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+  <symbol id="calendar" viewBox="0 0 20 20"><path d="M2.5 8h15M6 2v4m8-4v4M5 4h10a2.5 2.5 0 0 1 2.5 2.5v9A2.5 2.5 0 0 1 15 18H5a2.5 2.5 0 0 1-2.5-2.5v-9A2.5 2.5 0 0 1 5 4Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+  <symbol id="clock" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 5.5V10l2.8 2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+  <symbol id="speaker" viewBox="0 0 20 20"><path d="M2 8h3l4-3v10l-4-3H2Zm10-1a4 4 0 0 1 0 6m2-8a7 7 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+  <symbol id="mic" viewBox="0 0 20 20"><rect x="7" y="2" width="6" height="10" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.5 9v.5a5.5 5.5 0 0 0 11 0V9M10 15v3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+  <symbol id="search-icon" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m13 13 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="play-icon" viewBox="0 0 20 20"><path d="M5 3.7a1 1 0 0 1 1.5-.86l10.1 6.3a1 1 0 0 1 0 1.72L6.5 17.16A1 1 0 0 1 5 16.3z" fill="currentColor"/></symbol>
+  <symbol id="pause-icon" viewBox="0 0 20 20"><path d="M6 4v12m8-12v12" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/></symbol>
+  <symbol id="back" viewBox="0 0 20 20"><path d="M4 7a7.4 7.4 0 1 1-1 5M4 2.5V7h4.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><text x="10.5" y="13.7" text-anchor="middle" font-size="7" font-weight="650" fill="currentColor">15</text></symbol>
+  <symbol id="forward" viewBox="0 0 20 20"><path d="M16 7a7.4 7.4 0 1 0 1 5m-1-9.5V7h-4.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><text x="9.5" y="13.7" text-anchor="middle" font-size="7" font-weight="650" fill="currentColor">15</text></symbol>
+</svg>
+<div class="reader">
+  <main class="page">
+    <header class="meeting-header">
+      <div class="brand"><span class="mark"><svg class="icon" aria-hidden="true"><use href="#wave"/></svg></span>Meeting Intelligence</div>
+      <h1>{{TITLE}}</h1>
+      <div class="metadata">
+        <span class="label"><svg class="icon" aria-hidden="true"><use href="#calendar"/></svg>{{DATE}}</span>
+        <span class="label"><svg class="icon" aria-hidden="true"><use href="#speaker"/></svg>{{APPLICATION}}</span>
+        <span class="label"><svg class="icon" aria-hidden="true"><use href="#clock"/></svg>{{DURATION}}</span>
+      </div>
+      <p class="notice">{{NOTICE}}</p>
+    </header>
+    <section aria-labelledby="transcript-title">
+      <div class="transcript-header">
+        <div>
+          <div class="transcript-heading"><h2 id="transcript-title">转写记录</h2><span class="count" id="count" role="status">{{COUNT}} 段发言</span></div>
+          <p class="hint">{{TRANSCRIPT_HINT}}</p>
+        </div>
+        <div class="search-row" id="search-row" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#search-icon"/></svg>
+          <input type="search" id="search" aria-label="搜索转写" placeholder="搜索转写" autocomplete="off">
+        </div>
+      </div>
+      <div id="segments">{{SEGMENTS}}</div>
+      <p id="no-results" class="empty" hidden>没有找到匹配的内容，试试其它关键词。</p>
+    </section>
+    <footer>Meeting Intelligence · 可离线查看</footer>
+  </main>
+</div>
 {{PLAYER}}
-<section class="transcript" aria-labelledby="transcript-title">
-  <div class="transcript-header">
-    <h2 id="transcript-title">转写记录</h2>
-    <p class="hint">{{TRANSCRIPT_HINT}}</p>
-    <div class="search-row" id="search-row" hidden><label for="search">搜索转写</label><input type="search" id="search" placeholder="输入关键词" autocomplete="off"><span id="count" role="status" aria-live="polite">{{COUNT}} 段发言</span></div>
-  </div>
-  <div id="segments">{{SEGMENTS}}</div>
-  <p id="no-results" class="empty" hidden>没有找到匹配的内容，试试其它关键词。</p>
-</section>
-<footer>Meeting Intelligence · 单文件导出 · 可离线查看</footer>
-</main>
 <script nonce="{{NONCE}}">
 (() => {
   'use strict';
   const audio = document.getElementById('audio');
   const search = document.getElementById('search');
   const rows = [...document.querySelectorAll('.segment')].map(element => ({
-    element, start:Number(element.dataset.start), end:Number(element.dataset.end),
-    text:element.textContent.toLocaleLowerCase()
+    element, start: Number(element.dataset.start), end: Number(element.dataset.end),
+    text: element.textContent.toLocaleLowerCase()
   }));
-  document.getElementById('search-row').hidden = false;
+  document.getElementById('search-row').hidden = rows.length === 0;
   search.addEventListener('input', () => {
     const query = search.value.trim().toLocaleLowerCase();
     let count = 0;
@@ -88,50 +216,158 @@ footer { margin-top:24px; color:var(--muted); font-size:12px; text-align:center;
       if (!row.element.hidden) count++;
     }
     document.getElementById('count').textContent = query ? `${count} / ${rows.length} 段发言` : `${rows.length} 段发言`;
-    document.getElementById('no-results').hidden = count !== 0 || rows.length === 0;
+    document.getElementById('no-results').hidden = count !== 0;
+    if (audio && !audio.paused) updatePlayback();
   });
+  let updatePlayback = () => {};
   if (!audio) return;
-  document.body.classList.add('has-audio');
-  const follow = document.getElementById('follow');
+  const play = document.getElementById('play');
+  const slider = document.getElementById('position');
+  const time = document.getElementById('playback-time');
   const error = document.getElementById('audio-error');
+  const waveform = document.getElementById('waveform');
+  const draw = buildWaveform(waveform, audio);
   let lastFollowed = null;
+  let active = new Set();
+  const clock = value => {
+    const seconds = Math.floor(Number.isFinite(value) ? Math.max(0, value) : 0);
+    const pad = n => String(n).padStart(2, '0');
+    const hours = Math.floor(seconds / 3600);
+    return (hours ? `${hours}:` : '') + `${pad(Math.floor(seconds / 60) % 60)}:${pad(seconds % 60)}`;
+  };
+  const setPlaying = () => {
+    const label = audio.paused ? '播放录音' : '暂停录音';
+    play.setAttribute('aria-label', label);
+    play.title = label;
+    play.querySelector('use').setAttribute('href', audio.paused ? '#play-icon' : '#pause-icon');
+  };
   const update = () => {
+    const position = audio.currentTime;
+    slider.value = position;
+    time.textContent = `${clock(position)} / ${clock(audio.duration)}`;
+    slider.setAttribute('aria-valuetext', time.textContent);
+    draw();
+    const next = new Set();
     let first = null;
     for (const row of rows) {
-      const active = row.start <= audio.currentTime && audio.currentTime < row.end;
-      row.element.classList.toggle('is-active', active);
-      if (active) row.element.setAttribute('aria-current', 'true');
-      else row.element.removeAttribute('aria-current');
-      if (active && !row.element.hidden && !first) first = row.element;
+      if (row.start > position) break;
+      if (position >= row.end) continue;
+      next.add(row.element);
+      if (!active.has(row.element)) {
+        row.element.classList.add('is-active');
+        row.element.setAttribute('aria-current', 'true');
+      }
+      if (!first && !row.element.hidden) first = row.element;
     }
-    if (follow.checked && !audio.paused && first && first !== lastFollowed) first.scrollIntoView({block:'center', behavior:'instant'});
-    lastFollowed = first;
+    for (const element of active) {
+      if (next.has(element)) continue;
+      element.classList.remove('is-active');
+      element.removeAttribute('aria-current');
+    }
+    active = next;
+    if (!audio.paused && first !== lastFollowed) {
+      first?.scrollIntoView({ block: 'center' });
+      lastFollowed = first;
+    }
   };
-  const seek = async (time) => {
+  updatePlayback = update;
+  const durationChanged = () => {
+    const duration = audio.duration;
+    slider.disabled = !Number.isFinite(duration) || duration <= 0;
+    slider.max = slider.disabled ? 0 : duration;
+    update();
+  };
+  const seek = position => {
+    if (!Number.isFinite(position)) return;
+    audio.currentTime = Math.min(Math.max(0, position), Number.isFinite(audio.duration) ? audio.duration : Infinity);
+    update();
+  };
+  const showError = message => {
+    error.textContent = message;
+    error.hidden = false;
+  };
+  const start = async position => {
     try {
       error.hidden = true;
-      audio.currentTime = Math.min(time, Number.isFinite(audio.duration) ? audio.duration : time);
+      if (position !== undefined) seek(position);
       await audio.play();
-      update();
-    } catch (_) {
-      error.textContent = '未能开始播放，请使用上方播放器重试。';
-      error.hidden = false;
+    } catch (reason) {
+      if (reason.name !== 'AbortError') showError('未能开始播放，请在浏览器中打开完整的 HTML 文件后重试。');
     }
   };
+  play.addEventListener('click', () => { if (audio.paused) start(); else audio.pause(); });
+  document.getElementById('backward').addEventListener('click', () => seek(audio.currentTime - 15));
+  document.getElementById('forward-button').addEventListener('click', () => seek(audio.currentTime + 15));
+  slider.addEventListener('input', () => seek(Number(slider.value)));
   document.getElementById('segments').addEventListener('click', event => {
-    if (window.getSelection()?.toString()) return;
+    if (!event.target.closest('button') && window.getSelection()?.toString()) return;
     const row = event.target.closest('.segment');
-    if (row) seek(Number(row.dataset.start));
+    if (row) start(Number(row.dataset.start));
   });
   document.getElementById('speed').addEventListener('change', event => { audio.playbackRate = Number(event.target.value); });
-  follow.addEventListener('change', () => { lastFollowed = null; update(); });
+  audio.addEventListener('durationchange', durationChanged);
   audio.addEventListener('timeupdate', update);
   audio.addEventListener('seeked', update);
-  audio.addEventListener('play', update);
-  audio.addEventListener('error', () => {
-    error.textContent = '当前浏览器无法读取内嵌音频，请用 Safari、Chrome 或 Edge 打开完整的 HTML 文件。';
-    error.hidden = false;
-  });
+  audio.addEventListener('play', () => { lastFollowed = null; setPlaying(); update(); });
+  audio.addEventListener('pause', setPlaying);
+  audio.addEventListener('ended', setPlaying);
+  const mediaError = () => showError('当前浏览器无法读取内嵌音频，请用 Safari、Chrome 或 Edge 打开完整的 HTML 文件。');
+  audio.addEventListener('error', mediaError);
+  if (audio.error) mediaError();
+  durationChanged();
+  audio.hidden = true;
+  document.getElementById('player-controls').hidden = false;
+  document.body.classList.add('has-player');
+  draw();
+
+  function buildWaveform(canvas, media) {
+    if (!canvas.dataset.peaks || !window.ResizeObserver) return () => {};
+    const context = canvas.getContext('2d');
+    if (!context) return () => {};
+    const peaks = canvas.dataset.peaks.split(',').map(Number);
+    const highContrast = matchMedia('(forced-colors: active)');
+    const colorScheme = matchMedia('(prefers-color-scheme: dark)');
+    const draw = () => {
+      if (canvas.hidden) return;
+      const width = canvas.clientWidth, height = canvas.clientHeight;
+      if (!width || !height) return;
+      const pixelRatio = window.devicePixelRatio || 1;
+      const w = Math.round(width * pixelRatio), h = Math.round(height * pixelRatio);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.clearRect(0, 0, width, height);
+      const styles = getComputedStyle(canvas);
+      const remaining = styles.getPropertyValue('--wave').trim();
+      const played = styles.color;
+      const progress = media.duration > 0 ? Math.min(1, media.currentTime / media.duration) : 0;
+      const bars = Math.min(peaks.length, Math.max(1, Math.round(width / 4)));
+      const step = width / bars;
+      for (let index = 0; index < bars; index++) {
+        let peak = 0;
+        for (let i = Math.floor(index * peaks.length / bars); i < Math.floor((index + 1) * peaks.length / bars); i++) {
+          peak = Math.max(peak, peaks[i]);
+        }
+        const bar = Math.max(1.5, Math.sqrt(peak / 255) * height);
+        context.fillStyle = (index + 0.5) / bars <= progress ? played : remaining;
+        context.fillRect(index * step, (height - bar) / 2, Math.max(1, step - 2), bar);
+      }
+      context.fillStyle = played;
+      context.fillRect(Math.min(width - 1.5, progress * width), 0, 1.5, height);
+    };
+    const setAvailability = () => {
+      canvas.hidden = highContrast.matches;
+      canvas.parentElement.classList.toggle('waveform-ready', !canvas.hidden);
+      draw();
+    };
+    new ResizeObserver(draw).observe(canvas);
+    highContrast.addEventListener('change', setAvailability);
+    colorScheme.addEventListener('change', draw);
+    setAvailability();
+    return draw;
+  }
 })();
 </script>
 </body>

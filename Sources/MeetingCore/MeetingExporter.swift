@@ -85,6 +85,7 @@ enum TranscriptHTMLWriter {
             "TITLE": escape(recording.title),
             "APPLICATION": escape(recording.applicationName),
             "DATE": escape(date.string(from: recording.startedAt)),
+            "DURATION": AudioTimeline.clock(recording.duration),
             "COUNT": String(transcript.segments.count),
             "NOTICE": completed ? "已导出的转写快照 · 不随应用中的后续修改更新" : "转写尚未全部完成 · 本文件仅包含导出时已有的内容",
             "TRANSCRIPT_HINT": audioURL == nil ? "按时间排列，保留发言来源。" : "点击时间戳或文字，回听对应发言。"
@@ -107,19 +108,36 @@ enum TranscriptHTMLWriter {
             switch key {
             case "PLAYER":
                 if let audioURL {
+                    // The seek control also works as a plain slider if the
+                    // optional waveform cannot be read.
+                    let peaks = (try? AudioWaveform.mergedPeaks(at: audioURL)) ?? []
+                    try Task.checkCancellation()
+                    let envelope = peaks.map(String.init).joined(separator: ",")
                     try write("""
-                    <section class="player" aria-label="会议音频">
-                      <div class="player-heading"><strong>会议音频</strong><span>系统音频与麦克风已合并</span></div>
+                    <section class="player-dock" aria-label="会议音频">
+                    <div class="player">
                       <audio id="audio" controls preload="metadata" aria-label="会议录音" src="data:audio/mp4;base64,
                     """)
                     try writeBase64(audioURL, to: output)
                     try write("""
                     ">当前浏览器不支持播放此音频，请使用 Safari、Chrome 或 Edge。</audio>
-                      <div class="player-options">
-                        <label>播放速度 <select id="speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
-                        <label><input id="follow" type="checkbox"> 跟随播放</label>
+                      <div id="player-controls" class="player-controls" hidden>
+                        <div class="transport">
+                          <button id="backward" type="button" aria-label="后退 15 秒" title="后退 15 秒"><svg class="icon" aria-hidden="true"><use href="#back"/></svg></button>
+                          <button id="play" type="button" aria-label="播放录音" title="播放录音"><svg class="icon" aria-hidden="true"><use href="#play-icon"/></svg></button>
+                          <button id="forward-button" type="button" aria-label="前进 15 秒" title="前进 15 秒"><svg class="icon" aria-hidden="true"><use href="#forward"/></svg></button>
+                        </div>
+                        <div class="timeline">
+                          <span id="playback-time" class="playback-time"></span>
+                          <div class="seek-track">
+                            <canvas id="waveform" data-peaks="\(envelope)" aria-hidden="true" hidden></canvas>
+                            <input type="range" id="position" min="0" max="0" value="0" step="any" aria-label="录音播放进度" disabled>
+                          </div>
+                        </div>
+                        <select id="speed" aria-label="播放速度" title="播放速度"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
                       </div>
-                      <p id="audio-error" class="notice" role="status" hidden></p>
+                      <p id="audio-error" class="player-error" role="status" hidden></p>
+                    </div>
                     </section>
                     """)
                 }
@@ -132,9 +150,17 @@ enum TranscriptHTMLWriter {
                     let time = AudioTimeline.clock(segment.start)
                     let timestamp = audioURL == nil ? "<span class=\"timestamp\">\(time)</span>" :
                         "<button class=\"timestamp\" type=\"button\" aria-label=\"从 \(time) 播放\">\(time)</button>"
+                    let icon = segment.source == .microphone ? "mic" : "speaker"
+                    let engine = escape(segment.engine ?? "Apple SpeechTranscriber")
                     try write("""
                     <article class="segment" id="segment-\(index)" data-start="\(segment.start)" data-end="\(segment.end)">
-                      <div class="segment-meta">\(timestamp)<span class="source">\(segment.source.label)</span></div>
+                      <div class="segment-meta">
+                        \(timestamp)
+                        <div class="segment-labels">
+                          <span class="source label"><svg class="icon" aria-hidden="true"><use href="#\(icon)"/></svg>\(segment.source.label)</span>
+                          <span class="engine">\(engine)</span>
+                        </div>
+                      </div>
                       <p class="segment-text">\(escape(segment.text))</p>
                     </article>
                     """)
