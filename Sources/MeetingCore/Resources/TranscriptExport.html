@@ -24,6 +24,8 @@
 }
 * { box-sizing: border-box; }
 body {
+  display: grid; grid-template-rows: minmax(0, 1fr) auto;
+  height: 100vh; height: 100dvh; overflow: hidden;
   margin: 0;
   color: var(--text);
   background: var(--bg);
@@ -31,7 +33,8 @@ body {
 }
 [hidden] { display: none !important; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.page { width: min(100%, 940px); margin-inline: auto; padding: 16px 16px 24px; }
+.page, .transcript { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
+.page { width: min(100%, 940px); margin-inline: auto; padding-block-start: max(16px, env(safe-area-inset-top)); }
 .page, .player-dock {
   padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
 }
@@ -41,6 +44,9 @@ body {
 .mark { display: grid; place-items: center; width: 24px; height: 24px; background: var(--fill); border-radius: 7px; color: var(--text); }
 .icon { width: 1em; height: 1em; flex: none; }
 h1 { margin: 8px 0; font-size: 1.3125rem; line-height: 1.25; font-weight: 650; overflow-wrap: anywhere; }
+@media screen {
+  h1 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+}
 .metadata { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .metadata, .notice, .hint, .count { color: var(--muted); font-size: .8125rem; }
 .metadata { font-size: .75rem; }
@@ -66,6 +72,13 @@ input[type=search] {
   color: var(--text); background: var(--fill);
 }
 input[type=search]::placeholder { color: var(--muted); }
+.transcript-scroll {
+  --scroll-gutter: calc(var(--row-inset) + 4px);
+  min-height: 0; overflow: auto; overscroll-behavior-y: contain; scroll-padding-block: 12px;
+  margin-inline: calc(-1 * var(--scroll-gutter)); padding-inline: var(--scroll-gutter);
+  padding-block: 2px max(12px, env(safe-area-inset-bottom));
+}
+.transcript-scroll:focus-visible { outline-offset: -2px; }
 .segment {
   position: relative; display: grid; gap: 0 16px; padding: 2px var(--row-inset) 9px;
   margin: 0 calc(-1 * var(--row-inset)) 4px; border-radius: 10px;
@@ -92,11 +105,6 @@ footer { margin-top: 24px; font-size: .75rem; }
   box-shadow: 0 3px 14px #0001;
 }
 audio { display: block; width: 100%; }
-.has-player {
-  display: grid; grid-template-rows: minmax(0, 1fr) auto;
-  height: 100vh; height: 100dvh;
-}
-.has-player .reader { min-height: 0; overflow: auto; scroll-padding-block: 12px; }
 .player-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: center; height: 58px; }
 .transport { display: flex; align-items: center; }
 .timeline { min-width: 0; position: relative; }
@@ -129,7 +137,10 @@ input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent
 }
 @media (min-width: 40rem) {
   :root { --row-inset: 12px; }
-  .page { padding: 28px 32px; }
+  .page {
+    padding-block-start: max(28px, env(safe-area-inset-top));
+    padding-inline: max(32px, env(safe-area-inset-left)) max(32px, env(safe-area-inset-right));
+  }
   .meeting-header { padding-bottom: 22px; }
   .brand { gap: 8px; font-size: .8125rem; }
   .mark { width: 28px; height: 28px; border-radius: 8px; }
@@ -156,6 +167,17 @@ input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent
 @media (max-width: 20rem) {
   .player-dock { padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right)); }
 }
+@media screen and (orientation: landscape) and (max-height: 24rem) {
+  .page { padding-block-start: max(8px, env(safe-area-inset-top)); }
+  .meeting-header {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 12px;
+    padding-bottom: 6px;
+  }
+  .meeting-header :is(.metadata, .notice) { grid-column: 1 / -1; }
+  h1 { margin: 0; font-size: 1.125rem; }
+  .transcript-header { padding-block: 4px; }
+  .hint { display: none; }
+}
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #1e1e1e; --text: #e9e9ed; --muted: #b1b1b8; --line: #3d3d42;
@@ -165,9 +187,9 @@ input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent
 }
 @media print {
   :root { --bg: #fff; --text: #000; --muted: #555; --line: #ddd; --fill: #fff; }
-  body.has-player { display: block; height: auto; }
-  .has-player .reader { overflow: visible; }
+  body, .page, .transcript { display: block; height: auto; overflow: visible; }
   .page { width: auto; margin: 0; padding: 0; }
+  .transcript-scroll { overflow: visible; margin: 0; padding: 0; }
   .player-dock, .search-row, #no-results { display: none; }
   .segment { break-inside: avoid; margin-inline: 0; }
   .segment[hidden] { display: grid !important; }
@@ -190,11 +212,10 @@ input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent
   <symbol id="back" viewBox="0 0 20 20"><path d="M4 7a7.4 7.4 0 1 1-1 5M4 2.5V7h4.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><text x="10.5" y="13.7" text-anchor="middle" font-size="7" font-weight="650" fill="currentColor">15</text></symbol>
   <symbol id="forward" viewBox="0 0 20 20"><path d="M16 7a7.4 7.4 0 1 0 1 5m-1-9.5V7h-4.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><text x="9.5" y="13.7" text-anchor="middle" font-size="7" font-weight="650" fill="currentColor">15</text></symbol>
 </svg>
-<div class="reader">
-  <main class="page">
+<main class="page">
     <header class="meeting-header">
       <div class="brand"><span class="mark"><svg class="icon" aria-hidden="true"><use href="#wave"/></svg></span>Meeting Intelligence</div>
-      <h1>{{TITLE}}</h1>
+      <h1 title="{{TITLE}}">{{TITLE}}</h1>
       <div class="metadata">
         <span class="label"><svg class="icon" aria-hidden="true"><use href="#calendar"/></svg>{{DATE}}</span>
         <span class="label"><svg class="icon" aria-hidden="true"><use href="#speaker"/></svg>{{APPLICATION}}</span>
@@ -202,7 +223,7 @@ input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent
       </div>
       <p class="notice">{{NOTICE}}</p>
     </header>
-    <section aria-labelledby="transcript-title">
+    <section class="transcript" aria-labelledby="transcript-title">
       <div class="transcript-header">
         <div>
           <div class="transcript-heading"><h2 id="transcript-title">转写记录</h2><span class="count" id="count" role="status">{{COUNT}} 段发言</span></div>
@@ -213,12 +234,13 @@ input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent
           <input type="search" id="search" aria-label="搜索转写" placeholder="搜索转写" autocomplete="off">
         </div>
       </div>
-      <div id="segments">{{SEGMENTS}}</div>
-      <p id="no-results" class="empty" hidden>没有找到匹配的内容，试试其它关键词。</p>
+      <div class="transcript-scroll" id="transcript-scroll" role="region" aria-label="字幕列表" tabindex="0">
+        <div id="segments">{{SEGMENTS}}</div>
+        <p id="no-results" class="empty" hidden>没有找到匹配的内容，试试其它关键词。</p>
+        <footer>Meeting Intelligence · 离线转写快照</footer>
+      </div>
     </section>
-    <footer>Meeting Intelligence · 离线转写快照</footer>
-  </main>
-</div>
+</main>
 {{PLAYER}}
 <script nonce="{{NONCE}}">
 (() => {
@@ -246,6 +268,7 @@ input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent
   const play = document.getElementById('play');
   const slider = document.getElementById('position');
   const time = document.getElementById('playback-time');
+  const transcriptScroll = document.getElementById('transcript-scroll');
   const error = document.getElementById('audio-error');
   const waveform = document.getElementById('waveform');
   const draw = buildWaveform(waveform, audio);
@@ -288,7 +311,11 @@ input[type=range] { display: block; width: 100%; height: 44px; margin: 0; accent
     }
     active = next;
     if (!audio.paused && first !== lastFollowed) {
-      first?.scrollIntoView({ block: 'center' });
+      if (first) {
+        const row = first.getBoundingClientRect();
+        const center = row.top - transcriptScroll.getBoundingClientRect().top + row.height / 2;
+        transcriptScroll.scrollTop += center - transcriptScroll.clientHeight / 2;
+      }
       lastFollowed = first;
     }
   };
