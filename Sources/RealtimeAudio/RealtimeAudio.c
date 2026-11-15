@@ -90,3 +90,60 @@ OSStatus MIAudioIOProc(AudioObjectID device, const AudioTimeStamp *now,
     MIRingPush(context, input, hostTime);
     return noErr;
 }
+
+struct MIMicrophoneRender {
+    AudioUnit unit;
+    MIRing *ring;
+    float *samples;
+    uint32_t channels, maxFrames;
+    _Atomic OSStatus error;
+};
+
+MIMicrophoneRender *MIMicrophoneRenderCreate(AudioUnit unit, uint32_t channels, uint32_t maxFrames) {
+    if (channels < 1 || channels > 2 || maxFrames < 1 || maxFrames > 8192) return NULL;
+    MIMicrophoneRender *render = calloc(1, sizeof(MIMicrophoneRender));
+    if (!render) return NULL;
+    render->unit = unit;
+    render->channels = channels;
+    render->maxFrames = maxFrames;
+    atomic_init(&render->error, noErr);
+    render->ring = MIRingCreate(64, maxFrames * channels * sizeof(float));
+    render->samples = calloc(maxFrames * channels, sizeof(float));
+    if (!render->ring || !render->samples) { MIMicrophoneRenderDestroy(render); return NULL; }
+    MIRingSetStartTime(render->ring, UINT64_MAX);
+    volatile float *samples = render->samples;
+    for (size_t i = 0; i < (size_t)maxFrames * channels; i += 4096 / sizeof(float)) samples[i] = 0;
+    return render;
+}
+
+void MIMicrophoneRenderDestroy(MIMicrophoneRender *render) {
+    MIRingDestroy(render->ring);
+    free(render->samples);
+    free(render);
+}
+
+MIRing *MIMicrophoneRenderRing(MIMicrophoneRender *render) { return render->ring; }
+OSStatus MIMicrophoneRenderError(MIMicrophoneRender *render) {
+    return atomic_load_explicit(&render->error, memory_order_relaxed);
+}
+
+OSStatus MIMicrophoneInputProc(void *context, AudioUnitRenderActionFlags *flags, const AudioTimeStamp *time,
+                              UInt32 bus, UInt32 frames, AudioBufferList *data) {
+    (void)bus; (void)data;
+    MIMicrophoneRender *render = context;
+    OSStatus status = kAudioUnitErr_TooManyFramesToProcess;
+    if (frames <= render->maxFrames) {
+        AudioBufferList input = { .mNumberBuffers = 1, .mBuffers = {{
+            .mNumberChannels = render->channels,
+            .mDataByteSize = frames * render->channels * sizeof(float),
+            .mData = render->samples
+        }} };
+        status = AudioUnitRender(render->unit, flags, time, 1, frames, &input);
+        if (status == noErr) {
+            UInt64 hostTime = (time->mFlags & kAudioTimeStampHostTimeValid) ? time->mHostTime : 0;
+            MIRingPush(render->ring, &input, hostTime);
+        }
+    }
+    if (status != noErr) atomic_store_explicit(&render->error, status, memory_order_relaxed);
+    return status;
+}
