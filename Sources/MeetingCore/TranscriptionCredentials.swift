@@ -30,16 +30,34 @@ public enum TranscriptionCredentials {
     }
     public static func load(region: QwenRegion) throws -> String? {
         try session.load(region.rawValue) {
-            try readKeychain(region: region)
+            try readKeychain(region: region, allowInteraction: false)
         }
     }
-    private static func readKeychain(region: QwenRegion) throws -> String? {
+    /// Only the explicit Settings action can display macOS authorization UI.
+    /// Bypass the session cache so users can grant persistent access even after
+    /// having chosen the one-time Allow option in an earlier prompt.
+    public static func authorize(region: QwenRegion) throws -> Bool {
+        let key = try readKeychain(region: region, allowInteraction: true)
+        session.update(region.rawValue, value: key) {}
+        return key != nil
+    }
+    static func readQuery(region: QwenRegion, allowInteraction: Bool = false) -> [String: Any] {
         var request = query(region)
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
+        request[kSecUseAuthenticationUI as String] = allowInteraction ? kSecUseAuthenticationUIAllow : kSecUseAuthenticationUIFail
+        return request
+    }
+    private static func readKeychain(region: QwenRegion, allowInteraction: Bool) throws -> String? {
+        let request = readQuery(region: region, allowInteraction: allowInteraction)
         var value: CFTypeRef?
         let status = SecItemCopyMatching(request as CFDictionary, &value)
+        DiagnosticLog.shared.record("credentials.read", fields: ["region": region.rawValue,
+            "stage": allowInteraction ? "explicit_authorization" : "silent_read", "code": String(status)])
         if status == errSecItemNotFound { return nil }
+        if [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled].contains(status) {
+            throw MeetingError.message("钥匙串尚未授权或已锁定。请在设置中点击“授权钥匙串访问”，并在系统提示中选择“始终允许”。")
+        }
         guard status == errSecSuccess, let data = value as? Data, let key = String(data: data, encoding: .utf8) else {
             throw MeetingError.message("无法读取转写 API Key（Keychain：\(status)）。")
         }

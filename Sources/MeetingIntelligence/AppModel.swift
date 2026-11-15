@@ -180,7 +180,7 @@ final class AppModel {
                 credentialStatus = "尚未保存\(qwenRegion.label) API Key"
             case .authorizationRequired:
                 apiKeySaved = true
-                credentialStatus = "钥匙串待授权，使用云端转写时再请求访问"
+                credentialStatus = "钥匙串待授权，请点击“授权钥匙串访问”"
             }
         } catch { apiKeySaved = false; credentialStatus = error.localizedDescription }
     }
@@ -189,6 +189,15 @@ final class AppModel {
             try cloudConfiguration.validate()
             try TranscriptionCredentials.save(apiKeyDraft, region: qwenRegion)
             apiKeyDraft = ""; refreshCredentialStatus()
+        } catch { credentialStatus = error.localizedDescription }
+    }
+    func authorizeAPIKey() {
+        do {
+            let available = try TranscriptionCredentials.authorize(region: qwenRegion)
+            apiKeySaved = available
+            credentialStatus = available
+                ? "密钥已可用；系统提示中选择“始终允许”可记住对本应用的授权。"
+                : "尚未保存\(qwenRegion.label) API Key"
         } catch { credentialStatus = error.localizedDescription }
     }
     func deleteAPIKey() {
