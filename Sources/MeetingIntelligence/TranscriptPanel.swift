@@ -31,6 +31,7 @@ struct TranscriptPanel: View {
     let live: Bool
     @TranscriptViewState private var confirmCloudResubmission = false
     @TranscriptViewState private var followPlayback = true
+    @TranscriptViewState private var detailsExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Observe the destination, not every playback tick. During silence keep the
     // preceding utterance in view; overlapping tracks use a stable latest start.
@@ -50,6 +51,7 @@ struct TranscriptPanel: View {
     private var segments: [TranscriptSegment] { document?.segments ?? [] }
     private var recording: Recording? { model.recordings.first { $0.id == recordingID } }
     private var isRunning: Bool { model.transcription.running.contains(recordingID) }
+    private var isSummaryRunning: Bool { model.transcription.summaryRunning.contains(recordingID) }
     private var isCloudRunning: Bool { model.transcription.cloudRunning.contains(recordingID) }
     private var cloudModel: String? {
         if let provider = document?.cloud?.configuration.provider ?? recording?.cloudTranscription?.provider {
@@ -100,20 +102,7 @@ struct TranscriptPanel: View {
                     }
                     cloudProgress
                     exportStatus
-                    if let cloud = document?.cloud, !live {
-                        DisclosureGroup("转写详情") {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("跳过静音 \(AudioTimeline.clock(cloud.skippedSeconds)) · 按音轨累计")
-                                if cloud.noSpeechCount > 0 {
-                                    Text("云端未识别到语音：\(cloud.noSpeechCount) 个片段，保留本地结果")
-                                }
-                                if cloud.jobs.values.contains(where: { $0.usage != nil }) {
-                                    Text("输入 \(cloud.inputTokens) / 输出 \(cloud.outputTokens) Token")
-                                }
-                            }.font(.caption).foregroundStyle(.secondary).padding(.top, 4)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }.font(.caption).foregroundStyle(.secondary)
-                    }
+                    if !live { transcriptDetails }
                 }.padding(.horizontal, live ? 16 : 4).padding(.vertical, live ? 12 : 16)
 
                 if live { Divider().padding(.horizontal, 16) }
@@ -157,12 +146,88 @@ struct TranscriptPanel: View {
                 }
             }.frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         }
+        .onChange(of: recordingID) { _, _ in detailsExpanded = false }
         .confirmationDialog("重新提交未完成的云端任务？", isPresented: $confirmCloudResubmission) {
             Button("重新提交（可能重复计费）", role: .destructive) { model.resubmitCloudSelected() }
             Button("取消", role: .cancel) {}
         } message: {
             Text("请先到百炼控制台核对已有任务。重新提交会放弃未完成片段的 task ID，可能产生重复费用；已完成的片段会保留。")
         }
+    }
+
+    // Keep the disclosure outside the scrolling utterances so playback following
+    // cannot scroll the summary out of view or change its expanded state.
+    private var transcriptDetails: some View {
+        DisclosureGroup(isExpanded: $detailsExpanded) {
+            VStack(alignment: .leading, spacing: 14) {
+                summarySection
+                if let cloud = document?.cloud {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("转写详情").fontWeight(.medium)
+                        Text("跳过静音 \(AudioTimeline.clock(cloud.skippedSeconds)) · 按音轨累计")
+                        if cloud.noSpeechCount > 0 {
+                            Text("云端未识别到语音：\(cloud.noSpeechCount) 个片段，保留本地结果")
+                        }
+                        if cloud.jobs.values.contains(where: { $0.usage != nil }) {
+                            Text("输入 \(cloud.inputTokens) / 输出 \(cloud.outputTokens) Token")
+                        }
+                    }.font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(.top, 10).padding(.bottom, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            HStack(spacing: 8) {
+                Text("摘要与转写详情")
+                if isSummaryRunning {
+                    ProgressView().controlSize(.mini)
+                    Text(summaryProgressText)
+                } else if document?.summary?.error != nil {
+                    Text("摘要需重试").foregroundStyle(.orange)
+                } else if document?.currentSummary != nil {
+                    Text("摘要已生成").foregroundStyle(.tertiary)
+                }
+            }.font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var summaryProgressText: String {
+        guard let update = model.transcription.summaryProgress[recordingID] else { return "正在准备摘要…完成后自动保存。" }
+        let stage = update.stage == "discovering" ? "正在选择模型" : update.stage == "merging" ? "正在合并摘要" : "正在总结转写"
+        return update.total > 0 ? "\(stage) · \(update.completed) / \(update.total) 个分段" : stage
+    }
+
+    private var summarySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("会议摘要", systemImage: "text.badge.star").font(.headline)
+                Spacer()
+                if isSummaryRunning {
+                    ProgressView().controlSize(.small)
+                    Button("取消") { model.transcription.cancelSummary(recordingID) }
+                } else {
+                    Button(document?.currentSummary == nil ? "生成摘要" : "重新生成") { model.generateSummary(recordingID) }
+                        .disabled(model.isBusy || model.exportingRecordingID == recordingID || recording.map { !model.transcription.canSummarize($0) } != false)
+                }
+            }
+            if let summary = document?.currentSummary, let text = summary.text {
+                Text(verbatim: text).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                if let name = summary.model { Text(name).font(.caption).foregroundStyle(.tertiary) }
+                if let usage = summary.usage {
+                    Text("输入 \(usage.inputTokens.map(String.init) ?? "—") / 输出 \(usage.outputTokens.map(String.init) ?? "—") Token")
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+            if isSummaryRunning {
+                Text(summaryProgressText)
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let error = document?.summary?.error {
+                Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+            } else if document?.currentSummary == nil {
+                Text("配置摘要服务后，最终转写完成时自动生成；也可手动生成。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var transcriptHeading: some View {
@@ -263,7 +328,7 @@ struct TranscriptPanel: View {
             ForEach(MeetingExportKind.allCases, id: \.self) { kind in
                 Button("\(kind.title)…（\(kind.fileExtension.uppercased())）") {
                     model.exportMeeting(recordingID: recordingID, kind: kind)
-                }.disabled((kind.includesAudio && !hasAudio) || (kind.includesTranscript && document == nil))
+                }.disabled((kind.includesAudio && !hasAudio) || (kind.includesTranscript && (document == nil || isSummaryRunning)))
             }
         } label: { Label("导出", systemImage: "square.and.arrow.up") }
         .fixedSize().disabled(model.isBusy || model.exportingRecordingID != nil)

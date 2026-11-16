@@ -15,9 +15,9 @@ public enum MeetingExportKind: String, CaseIterable, Sendable {
     public var includesTranscript: Bool { self != .audio }
     public var explanation: String {
         switch self {
-        case .transcriptAndAudio: "导出单个 HTML 文件，内含转写和合并音频。可离线查看、播放及点击字幕回听，文件大小比单独音频略大。"
+        case .transcriptAndAudio: "导出单个 HTML 文件，内含摘要（如已生成）、转写和合并音频。可离线查看、播放及点击字幕回听，文件大小比单独音频略大。"
         case .audio: "系统音频与麦克风将按原始时间线混合为一个 M4A 文件。"
-        case .transcript: "导出包含发言来源和时间戳的 HTML 文件，可在浏览器中离线阅读和搜索，不包含音频。"
+        case .transcript: "导出包含摘要（如已生成）、发言来源和时间戳的 HTML 文件，可在浏览器中离线阅读和搜索，不包含音频。"
         }
     }
 }
@@ -140,6 +140,15 @@ enum TranscriptHTMLWriter {
                     </div>
                     </section>
                     """)
+                }
+            case "SUMMARY":
+                if transcript.currentSummary != nil || transcript.summaryExportNotice != nil {
+                    try write("<section class=\"summary\" aria-labelledby=\"summary-title\"><h2 id=\"summary-title\">会议摘要</h2>")
+                    if let notice = transcript.summaryExportNotice { try write("<p class=\"notice\">\(escape(notice))</p>") }
+                    if let summary = transcript.currentSummary, let text = summary.text {
+                        try write("<p class=\"summary-text\">\(escape(text))</p><p class=\"summary-model\">\(escape(summary.model ?? ""))</p>")
+                    }
+                    try write("</section>")
                 }
             case "SEGMENTS":
                 let ordered = transcript.segments.enumerated().sorted {

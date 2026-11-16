@@ -8,7 +8,7 @@ struct SettingsPage: View {
             VStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("设置").font(.system(size: 27, weight: .semibold))
-                    Text("管理录音、转写服务与会议数据。").foregroundStyle(.secondary)
+                    Text("管理录音、转写、摘要服务与会议数据。").foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 24) {
                     Label("数据存储", systemImage: "internaldrive").font(.headline)
@@ -72,6 +72,29 @@ struct SettingsPage: View {
                         Text("启用后会将音频片段上传至所选地域的百炼临时存储，并使用 Qwen-Audio 3.1 异步转写。API Key 仅保存在系统钥匙串。费用按百炼实际用量结算。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                }.padding(28).settingsCard()
+                VStack(alignment: .leading, spacing: 18) {
+                    Label("会议摘要", systemImage: "text.badge.star").font(.headline)
+                    LabeledContent("Provider", value: SummaryProviderID.openAICompatible.label)
+                    TextField("Base URL，例如 https://api.openai.com/v1", text: $model.summaryBaseURL)
+                        .textFieldStyle(.roundedBorder).accessibilityLabel("摘要 Base URL")
+                    TextField("模型，例如 deepseek-chat 或 gpt-4o-mini", text: $model.summaryModel)
+                        .textFieldStyle(.roundedBorder).accessibilityLabel("摘要模型")
+                    SecureField(model.summaryAPIKeySaved ? "输入新的 API Key 以替换" : "输入摘要 API Key", text: $model.summaryAPIKeyDraft)
+                        .textFieldStyle(.roundedBorder).accessibilityLabel("摘要 API Key")
+                    HStack {
+                        Button("保存摘要配置") { model.saveSummarySettings() }
+                        Button("移除 Key", role: .destructive) { model.deleteSummaryAPIKey() }.disabled(!model.summaryAPIKeySaved)
+                        Spacer()
+                        Button("授权钥匙串访问…") { model.authorizeSummaryAPIKey() }.disabled(!model.summaryAPIKeySaved)
+                    }
+                    Text(model.summaryCredentialStatus).font(.caption).foregroundStyle(.secondary)
+                    Text("保存后，会议转写全部完成时自动将转写文字发送至此服务生成摘要。启用云端精校的会议会等待精校完成；历史会议可点击“生成摘要”。移除 Key 可停止后续自动摘要。")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Text("支持 OpenAI Chat Completions 协议，直接使用你填写的模型。DeepSeek 可填写 Base URL https://api.deepseek.com 和模型 deepseek-chat；也可使用服务支持的其他模型。Base URL 应包含服务要求的路径（如 /v1），本机服务可使用 HTTP。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("API Key 仅保存在系统钥匙串。摘要保存至会议 Transcript JSON，并随 HTML、JSON 和 Markdown 转写导出。长会议会分段总结后合并，费用按服务实际用量结算。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }.padding(28).settingsCard()
                 VStack(alignment: .leading, spacing: 12) {
                     Label("诊断日志", systemImage: "doc.text.magnifyingglass").font(.headline)

@@ -6,6 +6,7 @@ if [[ "$configuration" != debug && "$configuration" != release ]]; then
   print -u2 'Usage: scripts/build-app.sh [debug|release]'
   exit 2
 fi
+./scripts/build-summary-helper.sh "$configuration"
 swift build -c "$configuration"
 bin_dir="$(swift build -c "$configuration" --show-bin-path)"
 app_path="$PWD/build/Meeting Intelligence.app"
@@ -15,6 +16,8 @@ cp "$bin_dir/MeetingIntelligence" "$app_path/Contents/MacOS/.MeetingIntelligence
 mv -f "$app_path/Contents/MacOS/.MeetingIntelligence.next" "$app_path/Contents/MacOS/MeetingIntelligence"
 cp "$bin_dir/meeting" "$app_path/Contents/MacOS/.meeting.next"
 mv -f "$app_path/Contents/MacOS/.meeting.next" "$app_path/Contents/MacOS/meeting"
+cp build/meeting-summary "$app_path/Contents/MacOS/.meeting-summary.next"
+mv -f "$app_path/Contents/MacOS/.meeting-summary.next" "$app_path/Contents/MacOS/meeting-summary"
 cp Resources/Info.plist "$app_path/Contents/Info.plist"
 build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 build_commit="$(git rev-parse --short HEAD 2>/dev/null || print uncommitted)"
@@ -34,6 +37,7 @@ if [[ -z "$signing_identity" ]]; then
     print 'No unique signing identity; using ad-hoc signing. Keychain may ask again after rebuilding.'
   fi
 fi
+codesign --force --sign "$signing_identity" "$app_path/Contents/MacOS/meeting-summary"
 codesign --force --sign "$signing_identity" "$app_path/Contents/MacOS/meeting"
 codesign --force --sign "$signing_identity" "$app_path"
 codesign --verify --strict "$app_path"

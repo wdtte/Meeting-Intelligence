@@ -29,7 +29,8 @@ public enum AgentTranscriptExport {
                 "local_completion_ratio": nullable(snapshot.closedChunkCount.flatMap { total in
                     total == 0 ? nil : Double(snapshot.processedChunkCount ?? 0) / Double(total)
                 }),
-                "cloud_completed_chunk_count": nullable(t?.cloud?.completedCount)]
+                "cloud_completed_chunk_count": nullable(t?.cloud?.completedCount),
+                "summary_status": nullable(t?.summaryState)]
     }
     public static func warning(_ value: MeetingReadWarning) -> [String: Any] {
         ["code": value.code, "message": value.message, "meeting_id": nullable(value.meetingID?.uuidString), "path": nullable(value.path)]
@@ -44,6 +45,10 @@ public enum AgentTranscriptExport {
     }
     public static func snapshot(_ value: MeetingReadSnapshot, exportedAt: Date = Date()) -> [String: Any] {
         var data = metadata(value)
+        if let summary = value.transcript?.currentSummary {
+            data["summary"] = ["text": nullable(summary.text), "model": nullable(summary.model),
+                               "provider": summary.provider.rawValue, "generated_at": nullable(summary.generatedAt.map(timestamp))]
+        } else { data["summary"] = NSNull() }
         data["segments"] = value.segments.map(segment)
         data["exported_at"] = timestamp(exportedAt)
         return envelope(data: data, warnings: value.warnings)
@@ -61,9 +66,14 @@ public enum AgentTranscriptExport {
                      "meeting_id: \(value.meetingID.uuidString)", "revision: \(value.revision)",
                      "exported_at: \(timestamp(exportedAt))", "schema_version: 1",
                      "content_state: \(value.contentState)", "local_status: \(value.transcript?.status ?? "unavailable")",
-                     "cloud_status: \(value.cloudEnabled ? (value.transcript?.cloud?.status ?? "pending") : "disabled")", ""]
+                     "cloud_status: \(value.cloudEnabled ? (value.transcript?.cloud?.status ?? "pending") : "disabled")",
+                     "summary_status: \(value.transcript?.summaryState ?? "not_generated")", ""]
         if let recording = value.recording {
             lines += ["started_at: \(timestamp(recording.startedAt))", "application: \(markdownEscape(recording.applicationName))", ""]
+        }
+        if let notice = value.transcript?.summaryExportNotice { lines += ["## 摘要状态", "", notice, ""] }
+        if let summary = value.transcript?.currentSummary, let text = summary.text {
+            lines += ["## 会议摘要", "", text.components(separatedBy: .newlines).map { "> " + markdownEscape($0) }.joined(separator: "\n"), ""]
         }
         for segment in value.segments {
             lines += ["## \(segment.start)–\(segment.end)s · \(segment.source.rawValue)", "",

@@ -2,6 +2,10 @@
 
 日期：2026-11-15。依据：DRAFT.md、本次需求及用户提供的 Figma UI 压缩包。本文保留原开发计划。2026-11-15 已初始化 Git 并实现 P0/P1 原生应用录音预览版；当前验证记录见下方，后续阶段仍待实现。
 
+## LLM 摘要接入方案更新（2026-11-16）
+
+摘要采用 SwiftUI / MeetingCore 客户端通过本地 JSON-RPC 调用 Rust 执行后端的方案，按 Codex 的分层方式组织。Rust provider 对接兼容 OpenAI 协议的 API，配置包含 Base URL、API Key 和模型名称；摘要随会议保存并纳入 HTML、JSON、Markdown 导出。现已完成实现，具体职责、通信契约、打包与验证记录见 [LLM-PROVIDER-PLAN.md](LLM-PROVIDER-PLAN.md)。本文后续章节保留的首版范围属于历史计划，摘要阶段以新方案为准。
+
 ## 本轮录音与转写实现（2026-11-15）
 
 - 已确定使用耳机播放＋普通共享麦克风方案。移除 VoiceProcessingIO 实现和实验性模式入口，避免与会议软件的麦克风处理冲突；新录制页与设置页提示佩戴耳机以获得最佳录音与转写质量。
