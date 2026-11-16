@@ -436,3 +436,30 @@ private func matchesSchema(_ value: Any, _ schema: [String: Any]) -> Bool {
         }
     }
 }
+
+@Test func summaryIsExportedInJSONAndMarkdownAndInvalidatedWhenTranscriptChanges() throws {
+    var fixture = try Fixture(); defer { fixture.clean() }
+    fixture.document.summary = TranscriptSummary(inputFingerprint: fixture.document.summaryRequest.fingerprint)
+    fixture.document.summary?.status = "completed"
+    fixture.document.summary?.text = "结论：周五发布。\n<script>literal</script>"
+    fixture.document.summary?.model = "fixture-model"
+    fixture.document.summary?.generatedAt = Date()
+    try fixture.save()
+    let jsonURL = fixture.root.appendingPathComponent("summary.json")
+    _ = try fixture.run(["export", fixture.recording.id.uuidString, "--output", jsonURL.path, "--format", "json"])
+    let json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: jsonURL)) as? [String: Any])
+    let data = try payload(json)
+    #expect((data["summary"] as? [String: Any])?["text"] as? String == fixture.document.summary?.text)
+    #expect(data["summary_status"] as? String == "completed")
+    let markdownURL = fixture.root.appendingPathComponent("summary.md")
+    _ = try fixture.run(["export", fixture.recording.id.uuidString, "--output", markdownURL.path, "--format", "markdown"])
+    let markdown = try String(contentsOf: markdownURL, encoding: .utf8)
+    #expect(markdown.contains("## 会议摘要"))
+    #expect(markdown.contains("结论：周五发布。"))
+    #expect(markdown.contains("&lt;script&gt;literal&lt;/script&gt;"))
+    fixture.document.segments[0].text = "已修改"
+    try fixture.save()
+    _ = try fixture.run(["export", fixture.recording.id.uuidString, "--output", jsonURL.path, "--format", "json", "--overwrite"])
+    let changed = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: jsonURL)) as? [String: Any])
+    #expect(try payload(changed)["summary"] is NSNull)
+}

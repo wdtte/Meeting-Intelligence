@@ -1,8 +1,8 @@
 # Meeting Intelligence
 
-面向 macOS 26+ 的原生会议录音和转写应用，使用 SwiftUI、Core Audio Process Tap、AVFoundation 和 Apple Speech，无第三方运行依赖。
+面向 macOS 26+ 的原生会议录音和转写应用，使用 SwiftUI、Core Audio Process Tap、AVFoundation 和 Apple Speech，摘要由随应用打包的 Rust 后端执行，运行时无需 Rust、Node 或 Bun。
 
-已实现：全局系统音频录音、可选麦克风分轨录音、录制中分段转写、字幕保存和失败续转、历史记录、双轨混听/单轨回放、点击字幕回听、菜单栏控制和主窗口内设置。支持可扩展的 provider 接口，目前提供 Apple 本地转写和 Qwen-Audio 3.1 会后异步精校。说话人识别、摘要和 SQLite 索引尚未接入。
+已实现：全局系统音频录音、可选麦克风分轨录音、录制中分段转写、字幕保存和失败续转、历史记录、双轨混听/单轨回放、点击字幕回听、菜单栏控制和主窗口内设置。支持可扩展的 provider 接口，目前提供 Apple 本地转写和 Qwen-Audio 3.1 会后异步精校。已接入 OpenAI 兼容 LLM 会议摘要。说话人识别和 SQLite 索引尚未接入。
 
 已提供面向 Agent 的只读 `meeting` CLI：会议筛选、状态查看、转写分页、关键词及上下文检索、JSON/Markdown 证据快照、JSON Schema 和目录诊断。应用无需启动，也不需要模型 Key。完整接口、安装方式和 Agent 使用流程见 [CLI-USAGE.md](CLI-USAGE.md)。
 
@@ -18,7 +18,7 @@ swift run meeting list --has-transcript --limit 20
 open 'build/Meeting Intelligence.app'
 ```
 
-需要 macOS 26+ 和对应 Swift SDK。本机使用 Command Line Tools / Swift 6.4.2。脚本优先使用本机唯一的 Apple Development 或 Developer ID Application 证书签名，也可通过 `MEETING_CODESIGN_IDENTITY` 指定签名身份；没有唯一可用证书时回退到 ad-hoc 签名。保持同一签名身份可避免每次构建后钥匙串重新识别应用。生成的应用不是公证分发版本。请通过 `.app` 运行，以便 macOS 正确识别权限用途声明。
+需要 macOS 26+、对应 Swift SDK 和 Rust/Cargo 工具链（当前验证版本 1.100.0）。构建脚本使用 Cargo.lock 锁定依赖，按当前 macOS 架构编译 Rust 摘要后端，打包至 `.app/Contents/MacOS/meeting-summary`，并先签名后端再签名应用。本机使用 Command Line Tools / Swift 6.4.2。脚本优先使用本机唯一的 Apple Development 或 Developer ID Application 证书签名，也可通过 `MEETING_CODESIGN_IDENTITY` 指定签名身份；没有唯一可用证书时回退到 ad-hoc 签名。保持同一签名身份可避免每次构建后钥匙串重新识别应用。生成的应用不是公证分发版本。请通过 `.app` 运行，以便 macOS 正确识别权限用途声明。
 
 1. 在新录制页面直接开始全局录制，无需选择应用。所有应用播放的声音会合并为一条系统音频轨，不区分来源 App；录制期间新启动或退出应用不会结束录音。
 2. 按需勾选麦克风，选择“系统默认”或固定的输入设备；选择会自动保存。首次使用会请求麦克风权限。麦克风启动失败时仍会录制系统声音，录制页和历史详情会提示缺少麦克风轨。建议佩戴耳机，减少扬声器声音被麦克风重复收录。
@@ -50,9 +50,31 @@ open 'build/Meeting Intelligence.app'
 
 当前采用百炼官方临时文件上传接口（有效期 48 小时），适用于个人接入验证。官方不推荐该机制用于生产、高并发或压测；正式分发前应增加受控 OSS 上传和生命周期管理，provider 协议可保持不变。临时云端文件没有在本版本中主动删除的接口实现，请按供应商保留政策处理。
 
-协议、凭据和异步任务适配在 `MeetingCore` 内，新增 provider 实现 `TranscriptionProvider`，并注册凭据/工厂及设置项即可。当前不提供任意第三方 API 地址输入。
+协议、凭据和异步任务适配在 `MeetingCore` 内，新增 provider 实现 `TranscriptionProvider`，并注册凭据/工厂及设置项即可。云端音频转写仍使用固定的百炼地址；LLM 摘要独立支持自定义 Base URL。
 
 接口依据：[Qwen Filetrans HTTP API](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-filetrans-api/)、[本地文件临时上传](https://help.aliyun.com/zh/model-studio/get-temporary-file-url)、[模型价格](https://help.aliyun.com/zh/model-studio/model-pricing)。Token 用量和实际费用以账户账单为准。
+
+## LLM 会议摘要
+
+1. 在“设置 → 会议摘要”填写 **Base URL**（默认 `https://api.openai.com/v1`）、**API Key** 和 **模型**，点击“保存摘要配置”。Base URL 应包含服务要求的路径前缀，如 `/v1`；远程地址使用 HTTPS，回环本机服务允许 HTTP。Key 独立保存到 macOS Keychain，不写入 UserDefaults、会议清单、字幕 JSON 或日志。首次需授权时点击“授权钥匙串访问”。保存配置只校验格式与写入钥匙串，不代表在线鉴权成功。
+2. 保存后，会议最终转写完成时自动将转写文字发送给配置的服务；若启用 Qwen 云端精校，会等待精校完成。历史会议可点击“生成摘要”，成功后显示模型和接口提供的 Token 用量。移除 Key 可停用后续自动摘要。
+3. Provider 使用 OpenAI Chat Completions 协议，直接发送设置中的模型名称，不再由应用自动选择模型。默认值 `gpt-4o-mini` 可修改。DeepSeek 示例：Base URL `https://api.deepseek.com`，模型 `deepseek-chat`，API Key 使用 DeepSeek 提供的 Key；也可填写服务支持的其他文本模型。分段与合并始终使用同一配置模型，结果记录服务返回的实际模型（若提供）。错误不会自动切换模型。
+4. 长转写按 12,000 个 Unicode 字符分段总结，再逐层合并，保留末尾内容；界面显示分段与合并进度。摘要不猜测负责人和日期，音轨来源不当作说话人身份。模型输出仍需人工核对。
+5. 摘要的正文、状态、模型、生成时间、输入指纹及已返回的用量随会议 Transcript JSON 原子保存。相同输入已有成功摘要时复用，支持手动重新生成。失败或中断可独立重试，字幕不重转；重新生成失败时保留同一输入的上次成功摘要。转写改变后旧摘要失效，迟到结果不会覆盖新转写。
+6. HTML 转写、HTML 转写＋音频以及 CLI JSON/Markdown 导出均包含成功摘要；未完成、失败或过期时导出明确状态。摘要生成期间，应用中的转写导出会等待其完成或取消。纯音频仍导出 M4A。
+7. “取消”停止本机请求，不保证服务端停止处理或计费。每次 HTTP 请求最多等待 120 秒；后端连接 150 秒无进度会被中断。超时、退出、限流等不自动重放可能计费的请求，需显式重试。单条 RPC 消息上限 8 MiB，超过时拒绝提交，不截断转写。
+
+架构：SwiftUI / MeetingCore → JSON-RPC 2.0 over stdio → Rust `meeting-summary` → `SummaryProvider` → `reqwest` OpenAI 兼容 API。凭据只经匿名管道传给后端，HTTP 禁止重定向和自动重试；stdout 仅承载 RPC。协议版本握手、请求 ID、会议 ID 与输入指纹共同校验结果。详细方案见 [LLM-PROVIDER-PLAN.md](LLM-PROVIDER-PLAN.md)。
+
+离线验证（不需要真实 Key，不调用收费服务）：
+
+```sh
+./scripts/test.sh
+cargo test --locked --manifest-path Helpers/summary/Cargo.toml
+cargo clippy --locked --manifest-path Helpers/summary/Cargo.toml --all-targets -- -D warnings
+./scripts/build-summary-helper.sh
+python3 scripts/test-summary-backend.py --swift
+```
 
 ## 耳机录音与转写角色
 

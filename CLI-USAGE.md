@@ -125,3 +125,7 @@ meeting doctor
 ```
 
 测试使用合成 JSON 与临时目录，覆盖历史/自定义目录、独立文件、旧数据、静音、混合引擎与云端状态、错误契约、Unicode 搜索、长会议分页、revision 变化、原子导出和不覆盖源文件。子进程测试验证 stdout 可直接解析为 JSON、stderr 不混入正文、退出码正确，以及所有只读命令前后源目录的文件集合和字节不变。测试不录音、不下载模型、不调用付费接口。
+
+### 会议摘要
+
+`show`、列表和转写响应的 `summary_status` 为摘要状态（未生成时为 `null`，过期时为 `stale`）；不影响原有 `content_state` 转写完整性含义。`export` 的 JSON 快照新增 `summary`，包含 `text`、`model`、`provider`、`generated_at`；无有效摘要时为 `null`。Markdown 导出在字幕前包含会议摘要，失败、中断或过期时写明摘要状态。正文按文本转义，不执行模型返回的 HTML。CLI 保持只读，不联网、不读取模型 Key，也不触发摘要生成。

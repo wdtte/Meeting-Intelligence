@@ -88,7 +88,7 @@ final class AppModel {
               let recording = recordings.first(where: { $0.id == recordingID }),
               let source = recordingStores[recordingID],
               !kind.includesAudio || recording.duration > 0,
-              !kind.includesTranscript || transcription.documents[recordingID] != nil else { return }
+              !kind.includesTranscript || (transcription.documents[recordingID] != nil && !transcription.summaryRunning.contains(recordingID)) else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = kind == .audio ? [.mpeg4Audio] : [.html]
         panel.canCreateDirectories = true
@@ -211,6 +211,51 @@ final class AppModel {
         let region = qwenRegion == .beijing ? "cn-beijing" : "ap-southeast-1"
         NSWorkspace.shared.open(URL(string: "https://bailian.console.aliyun.com/\(region)/model/settings/api-key")!)
     }
+    var summaryBaseURL = UserDefaults.standard.string(forKey: SummaryConfiguration.baseURLPreference) ?? SummaryConfiguration.defaultBaseURL
+    var summaryModel = UserDefaults.standard.string(forKey: SummaryConfiguration.modelPreference) ?? SummaryConfiguration.defaultModel
+    var summaryAPIKeyDraft = ""
+    var summaryAPIKeySaved = false
+    var summaryCredentialStatus = ""
+    func refreshSummaryCredentialStatus() {
+        do {
+            switch try SummaryCredentials.presence() {
+            case .saved:
+                summaryAPIKeySaved = true; summaryCredentialStatus = "摘要 API Key 已保存在系统钥匙串"
+            case .missing:
+                summaryAPIKeySaved = false; summaryCredentialStatus = "尚未配置摘要 API Key"
+            case .authorizationRequired:
+                summaryAPIKeySaved = true; summaryCredentialStatus = "摘要钥匙串待授权，请点击“授权钥匙串访问”"
+            }
+        } catch { summaryCredentialStatus = error.localizedDescription }
+    }
+    func saveSummarySettings() {
+        do {
+            let configuration = SummaryConfiguration(baseURL: summaryBaseURL, model: summaryModel)
+            try configuration.validate()
+            if !summaryAPIKeyDraft.isEmpty { try SummaryCredentials.save(summaryAPIKeyDraft) }
+            else if !summaryAPIKeySaved { throw MeetingError.message("请输入摘要 API Key。") }
+            UserDefaults.standard.set(configuration.baseURL, forKey: SummaryConfiguration.baseURLPreference)
+            UserDefaults.standard.set(configuration.model, forKey: SummaryConfiguration.modelPreference)
+            summaryBaseURL = configuration.baseURL; summaryModel = configuration.model; summaryAPIKeyDraft = ""
+            refreshSummaryCredentialStatus()
+            summaryCredentialStatus += "；配置已保存"
+        } catch { summaryCredentialStatus = error.localizedDescription }
+    }
+    func authorizeSummaryAPIKey() {
+        do {
+            summaryAPIKeySaved = try SummaryCredentials.authorize()
+            summaryCredentialStatus = summaryAPIKeySaved ? "摘要密钥已可用；系统提示中选择“始终允许”可记住授权。" : "尚未保存摘要 API Key"
+        } catch { summaryCredentialStatus = error.localizedDescription }
+    }
+    func deleteSummaryAPIKey() {
+        do { try SummaryCredentials.delete(); summaryAPIKeyDraft = ""; refreshSummaryCredentialStatus() }
+        catch { summaryCredentialStatus = error.localizedDescription }
+    }
+    func generateSummary(_ id: UUID) {
+        guard !isBusy, deletingRecordingID == nil, exportingRecordingID != id,
+              let recording = recordings.first(where: { $0.id == id }) else { return }
+        transcription.generateSummary(recording)
+    }
     private func validatedCloudConfiguration() throws -> CloudTranscriptionConfiguration {
         let configuration = cloudConfiguration
         try configuration.validate()
@@ -294,6 +339,7 @@ final class AppModel {
         }
         catch { libraryError = error.localizedDescription }
         refreshCredentialStatus()
+        refreshSummaryCredentialStatus()
         Task { [weak self] in await self?.prepareSpeechModel() }
         ticker = Task { [weak self] in
             while !Task.isCancelled {

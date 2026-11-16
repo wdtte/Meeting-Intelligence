@@ -24,6 +24,7 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
     public var status = "pending"
     public var error: String?
     public var cloud: CloudTranscriptionProgress?
+    public var summary: TranscriptSummary?
     public init(recordingID: UUID, locale: String) { self.recordingID = recordingID; self.locale = locale }
     public mutating func commit(_ results: [TranscriptSegment], for chunk: AudioChunk) throws {
         guard results.allSatisfy({ $0.chunkID == chunk.id && $0.source == chunk.audioSource }) else {
@@ -36,6 +37,28 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
         segments.append(contentsOf: results)
         segments.sort { $0.start == $1.start ? $0.source.rawValue < $1.source.rawValue : $0.start < $1.start }
         processedChunks.insert(chunk.id)
+        // A summary describes a specific transcript snapshot. Never export stale text.
+        if let summary, summary.inputFingerprint != summaryRequest.fingerprint { self.summary = nil }
+    }
+    public var summaryRequest: SummaryRequest { SummaryRequest(recordingID: recordingID, locale: locale, segments: segments) }
+    public var currentSummary: TranscriptSummary? {
+        guard let summary, summary.status == "completed" || summary.generatedAt != nil,
+              summary.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+              summary.inputFingerprint == summaryRequest.fingerprint else { return nil }
+        return summary
+    }
+    public var summaryState: String? {
+        guard let summary else { return nil }
+        return summary.inputFingerprint == summaryRequest.fingerprint ? summary.status : "stale"
+    }
+    public var summaryExportNotice: String? {
+        switch summaryState {
+        case "stale": "转写已更新，摘要待重新生成。"
+        case "running", "pending": "摘要正在生成，本文件仅包含导出时已有的内容。"
+        case "failed": currentSummary == nil ? "摘要生成失败，可在应用中独立重试。" : "本次摘要生成失败，以下保留上次成功摘要。"
+        case "interrupted": currentSummary == nil ? "摘要生成已中断，可在应用中独立重试。" : "本次摘要生成已中断，以下保留上次成功摘要。"
+        default: nil
+        }
     }
     public func save(to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

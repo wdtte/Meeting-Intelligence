@@ -30,7 +30,7 @@ enum CLISchema {
          "cloud_status": string(), "content_state": ["type": "string", "enum": ["unavailable", "partial", "complete", "unknown"]],
          "revision": ["type": "string", "pattern": "^sha256:[0-9a-f]{64}$"], "locale": string(nullable: true),
          "segment_count": integer, "has_transcript": boolean, "closed_chunk_count": nullableInteger,
-         "processed_chunk_count": nullableInteger, "local_completion_ratio": nullableNumber, "cloud_completed_chunk_count": nullableInteger]
+         "processed_chunk_count": nullableInteger, "local_completion_ratio": nullableNumber, "cloud_completed_chunk_count": nullableInteger, "summary_status": string(nullable: true)]
     }
     static var page: [String: Any] { object(["next_cursor": string(nullable: true), "has_more": boolean]) }
     static var warning: [String: Any] {
@@ -104,6 +104,9 @@ enum CLISchema {
                                    "response_schema": output(command.name)]
         if command.name == "export" {
             var snapshotProperties = metadata
+            snapshotProperties["summary"] = ["oneOf": [["type": "null"], object([
+                "text": string(nullable: true), "model": string(nullable: true), "provider": string(),
+                "generated_at": string(nullable: true, format: "date-time")])]]
             snapshotProperties["segments"] = array(segment); snapshotProperties["exported_at"] = string(format: "date-time")
             value["json_export_schema"] = success(data: object(snapshotProperties))
         }

@@ -6,6 +6,11 @@ public final class TranscriptionCoordinator {
     public private(set) var documents: [UUID: TranscriptDocument] = [:]
     public private(set) var running: Set<UUID> = []
     public private(set) var cloudRunning: Set<UUID> = []
+    public private(set) var summaryProgress: [UUID: SummaryProgress] = [:]
+    public private(set) var summaryRunning: Set<UUID> = []
+    typealias SummaryFactory = @Sendable () throws -> (any SummaryProvider)?
+    @ObservationIgnored private let summaryFactory: SummaryFactory
+    @ObservationIgnored private var summaryTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var cloudTasks: [UUID: Task<Void, Never>] = [:]
     typealias CloudFactory = @Sendable (CloudTranscriptionConfiguration) throws -> any TranscriptionProvider
     @ObservationIgnored private let cloudFactory: CloudFactory
@@ -30,13 +35,14 @@ public final class TranscriptionCoordinator {
                  throw MeetingError.message("请在设置中保存\(configuration.region.label)地域的百炼 API Key。")
              }
              return QwenTranscriptionProvider(configuration: configuration, apiKey: key)
-         }) {
+         }, summaryFactory: @escaping SummaryFactory = { try OpenAISummaryProvider.configured() }) {
+        self.summaryFactory = summaryFactory
         self.prepare = prepare; self.recognize = recognize; self.cloudFactory = cloudFactory
     }
-    public func wait(for id: UUID) async { await tasks[id]?.value; await cloudTasks[id]?.value }
+    public func wait(for id: UUID) async { await tasks[id]?.value; await cloudTasks[id]?.value; await summaryTasks[id]?.value }
 
     public func load(_ recording: Recording) {
-        guard !running.contains(recording.id), let path = recording.transcriptPath else { return }
+        guard !running.contains(recording.id), !summaryRunning.contains(recording.id), let path = recording.transcriptPath else { return }
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else { return }
         do {
@@ -50,6 +56,10 @@ public final class TranscriptionCoordinator {
             if document.cloud?.status == "running" || document.cloud?.status == "pending" {
                 document.cloud?.status = "interrupted"
                 document.cloud?.error = "上次云端精校未完成，可继续查询已有任务。"
+            }
+            if document.summary?.status == "running" || document.summary?.status == "pending" {
+                document.summary?.status = "interrupted"
+                document.summary?.error = "上次摘要未完成，可重新生成。"
             }
             documents[recording.id] = document
         } catch {
@@ -65,15 +75,16 @@ public final class TranscriptionCoordinator {
         guard !paused.contains(recording.id) else { return }
         guard tasks[recording.id] == nil, cloudTasks[recording.id] == nil else { return }
         if documents[recording.id]?.status == "failed", !retry {
-            startCloud(recording, store: store, retry: false); return
+            finishTranscription(recording, store: store, retry: false); return
         }
+        summaryTasks[recording.id]?.cancel()
         running.insert(recording.id)
         tasks[recording.id] = Task { [weak self] in
             guard let self else { return }
             defer {
                 self.running.remove(recording.id); self.tasks[recording.id] = nil
                 if let latest = self.pending[recording.id], !Task.isCancelled {
-                    self.startCloud(latest, store: store, retry: retry)
+                    self.finishTranscription(latest, store: store, retry: retry)
                 }
             }
             let url = URL(fileURLWithPath: path)
@@ -115,7 +126,7 @@ public final class TranscriptionCoordinator {
             }
         }
     }
-    public func pause(_ id: UUID) { paused.insert(id); tasks[id]?.cancel(); cloudTasks[id]?.cancel() }
+    public func pause(_ id: UUID) { paused.insert(id); tasks[id]?.cancel(); cloudTasks[id]?.cancel(); summaryTasks[id]?.cancel() }
     public func stopAndForget(_ id: UUID) async {
         pause(id)
         pending.removeValue(forKey: id)
@@ -125,6 +136,7 @@ public final class TranscriptionCoordinator {
     public func cancelAll() {
         for task in tasks.values { task.cancel() }
         for task in cloudTasks.values { task.cancel() }
+        for task in summaryTasks.values { task.cancel() }
     }
 
     /// Explicit, user-confirmed retry for failed/expired or ambiguous submissions only.
@@ -155,6 +167,7 @@ public final class TranscriptionCoordinator {
             defer {
                 self.running.remove(recording.id); self.cloudRunning.remove(recording.id)
                 self.cloudTasks[recording.id] = nil
+                if !Task.isCancelled { self.startSummary(recording) }
             }
             let url = URL(fileURLWithPath: path)
             var diagnosticContext = ["recording_id": recording.id.uuidString, "stage": "save_progress"]
@@ -227,6 +240,88 @@ public final class TranscriptionCoordinator {
                 }
             }
         }
+    }
+    private func finishTranscription(_ recording: Recording, store: RecordingStore, retry: Bool) {
+        startCloud(recording, store: store, retry: retry)
+        if !cloudRunning.contains(recording.id), !paused.contains(recording.id) { startSummary(recording) }
+    }
+
+    public func canSummarize(_ recording: Recording) -> Bool {
+        guard recording.status != .recording, !running.contains(recording.id),
+              let document = documents[recording.id], !document.summaryRequest.text.isEmpty else { return false }
+        return recording.cloudTranscription != nil ? document.cloud?.status == "completed" : document.status == "completed"
+    }
+    public func generateSummary(_ recording: Recording) { startSummary(recording, retry: true) }
+    public func cancelSummary(_ id: UUID) { summaryTasks[id]?.cancel() }
+
+    private func startSummary(_ recording: Recording, retry: Bool = false) {
+        guard canSummarize(recording), summaryTasks[recording.id] == nil,
+              let path = recording.transcriptPath, var document = documents[recording.id] else { return }
+        if !retry, document.currentSummary != nil || ["failed", "interrupted"].contains(document.summary?.status ?? "") { return }
+        let url = URL(fileURLWithPath: path)
+        // A corrupt or replaced file must not be overwritten by in-memory results.
+        guard let saved = try? TranscriptDocument.load(from: url, recordingID: recording.id),
+              saved.summaryRequest.fingerprint == document.summaryRequest.fingerprint else { return }
+        let request = document.summaryRequest
+        do {
+            guard let provider = try summaryFactory() else {
+                if retry { throw MeetingError.message("请先在设置中配置摘要服务的 Base URL 和 API Key。") }
+                return
+            }
+            if document.summary?.inputFingerprint != request.fingerprint {
+                document.summary = TranscriptSummary(inputFingerprint: request.fingerprint)
+            }
+            document.summary?.error = nil
+            document.summary?.requestID = request.id
+            document.summary?.provider = provider.id
+            document.summary?.status = "running"
+            try document.save(to: url); documents[recording.id] = document
+            summaryRunning.insert(recording.id)
+            summaryTasks[recording.id] = Task { [weak self] in
+                guard let self else { return }
+                defer { self.summaryRunning.remove(recording.id); self.summaryTasks[recording.id] = nil; self.summaryProgress[recording.id] = nil }
+                do {
+                    let result = try await provider.summarize(request) { [weak self] update in
+                        await self?.recordSummaryProgress(update, recordingID: recording.id, request: request)
+                    }
+                    try Task.checkCancellation()
+                    guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        throw MeetingError.message("摘要服务未返回有效文本。")
+                    }
+                    guard var latest = self.documents[recording.id], latest.summaryRequest.fingerprint == request.fingerprint, latest.summary?.requestID == request.id else { return }
+                    // Read after awaiting so cloud checkpoints and other changes are preserved.
+                    guard (try? TranscriptDocument.load(from: url, recordingID: recording.id)) == latest else {
+                        throw MeetingError.message("转写文件已更改，请重新加载会议后生成摘要。")
+                    }
+                    latest.summary?.status = "completed"; latest.summary?.text = result.text
+                    latest.summary?.usage = result.usage; latest.summary?.model = result.model; latest.summary?.generatedAt = Date(); latest.summary?.error = nil
+                    try latest.save(to: url); self.documents[recording.id] = latest
+                } catch {
+                    guard var latest = self.documents[recording.id], latest.summary?.inputFingerprint == request.fingerprint, latest.summary?.requestID == request.id else { return }
+                    latest.summary?.status = Task.isCancelled || error is CancellationError || error is SummaryRPCError ? "interrupted" : "failed"
+                    latest.summary?.error = Task.isCancelled || error is CancellationError ? "摘要已取消，可重新生成。" : error.localizedDescription
+                    if (try? TranscriptDocument.load(from: url, recordingID: recording.id)) == self.documents[recording.id] {
+                        do { try latest.save(to: url) }
+                        catch { latest.summary?.error = "摘要保存失败：\(error.localizedDescription)" }
+                    }
+                    self.documents[recording.id] = latest
+                }
+            }
+        } catch {
+            if document.summary?.inputFingerprint != request.fingerprint {
+                document.summary = TranscriptSummary(inputFingerprint: request.fingerprint)
+            }
+            document.summary?.status = "failed"; document.summary?.error = error.localizedDescription
+            do { try document.save(to: url) }
+            catch { document.summary?.error = "摘要保存失败：\(error.localizedDescription)" }
+            documents[recording.id] = document
+        }
+    }
+
+    private func recordSummaryProgress(_ update: SummaryProgress, recordingID: UUID, request: SummaryRequest) {
+        guard summaryRunning.contains(recordingID), documents[recordingID]?.summary?.requestID == request.id,
+              documents[recordingID]?.summaryRequest.fingerprint == request.fingerprint else { return }
+        summaryProgress[recordingID] = update
     }
     private func saveCheckpoint(_ checkpoint: ProviderCheckpoint, recordingID: UUID, jobKey: String, url: URL) throws {
         try updateCloud(recordingID, url: url) { $0.jobs[jobKey]?.checkpoint = checkpoint }

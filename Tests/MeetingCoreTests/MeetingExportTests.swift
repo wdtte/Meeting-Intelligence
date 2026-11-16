@@ -142,3 +142,26 @@ func streamedBase64PreservesBytesAcrossReadBoundaries(count: Int) throws {
     let encoded = try String(contentsOf: output, encoding: .utf8)
     #expect(Data(base64Encoded: encoded) == bytes)
 }
+
+@Test func generatedSummaryIsIncludedAndEscapedInBothHTMLExports() async throws {
+    var (store, recording, transcript) = try htmlFixture()
+    defer { try? FileManager.default.removeItem(at: store.root) }
+    try htmlFixtureAudio(recording: &recording, store: store)
+    transcript.summary = TranscriptSummary(inputFingerprint: transcript.summaryRequest.fingerprint)
+    transcript.summary?.status = "completed"
+    transcript.summary?.model = "fixture-model"
+    transcript.summary?.text = "结论：周五发布。\n<script>alert('summary')</script> {{NONCE}} & <img src=x>"
+    for kind in [MeetingExportKind.transcript, .transcriptAndAudio] {
+        let destination = store.root.appendingPathComponent("summary-\(kind.rawValue).html")
+        try await MeetingExporter.export(recording, transcript: transcript, store: store, kind: kind, to: destination)
+        let html = try String(contentsOf: destination, encoding: .utf8)
+        #expect(html.contains("会议摘要"))
+        #expect(html.contains("结论：周五发布。"))
+        #expect(html.contains("&lt;script&gt;alert(&#39;summary&#39;)&lt;/script&gt; {{NONCE}} &amp; &lt;img src=x&gt;"))
+        #expect(!html.contains("<script>alert('summary')</script>"))
+    }
+    transcript.segments[0].text = "修改后的转写"
+    let destination = store.root.appendingPathComponent("stale.html")
+    try await MeetingExporter.export(recording, transcript: transcript, store: store, kind: .transcript, to: destination)
+    #expect(!(try String(contentsOf: destination, encoding: .utf8)).contains("结论：周五发布。"))
+}
