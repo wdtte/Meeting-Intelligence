@@ -39,12 +39,18 @@ public struct ProviderCheckpoint: Codable, Sendable, Equatable {
     public enum Phase: String, Codable, Sendable { case submitting, submitted, rejected }
     public var phase: Phase
     public var taskID: String?
-    public init(phase: Phase, taskID: String? = nil) { self.phase = phase; self.taskID = taskID }
+    public var keyID: String?
+    public init(phase: Phase, taskID: String? = nil, keyID: String? = nil) {
+        self.phase = phase; self.taskID = taskID; self.keyID = keyID
+    }
 }
 
 public struct TranscriptionUsage: Codable, Sendable, Equatable {
     public var inputTokens: Int?
     public var outputTokens: Int?
+    public var modelName: String?
+    public var keyID: String?
+    public var recordedAt: Date?
     public init(inputTokens: Int? = nil, outputTokens: Int? = nil) {
         self.inputTokens = inputTokens; self.outputTokens = outputTokens
     }

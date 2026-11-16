@@ -58,7 +58,12 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
         if let id = request.recordingID { context["recording_id"] = id.uuidString }
         diagnostics.record("cloud.chunk.begin", fields: context)
         do {
-            let result = try await transcribeChunk(request, context: context, checkpoint: checkpoint)
+            var result = try await transcribeChunk(request, context: context, checkpoint: checkpoint)
+            result.usage = (result.usage ?? TranscriptionUsage()).attributed(modelName: configuration.model, apiKey: apiKey)
+            if request.checkpoint?.taskID != nil {
+                // Polling can use a different credential from the original submission.
+                result.usage?.keyID = request.checkpoint?.keyID
+            }
             context["segments"] = String(result.segments.count)
             context["no_speech"] = String(result.noSpeechRecognized)
             diagnostics.record("cloud.chunk.completed", fields: context)
@@ -98,7 +103,7 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
                 throw MeetingError.message("云端未返回 task ID；请核对控制台后再重新提交。")
             }
             taskID = accepted
-            try await checkpoint(ProviderCheckpoint(phase: .submitted, taskID: accepted))
+            try await checkpoint(ProviderCheckpoint(phase: .submitted, taskID: accepted, keyID: APIUsageIdentity.keyID(for: apiKey)))
         }
         guard let taskID, taskID.range(of: "^[a-zA-Z0-9_-]{1,256}$", options: .regularExpression) != nil else {
             throw MeetingError.message("云端 task ID 无效，请保留任务记录。")

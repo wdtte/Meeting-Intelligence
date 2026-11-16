@@ -25,7 +25,7 @@ struct MicrophoneControls: View {
         .task(id: model.microphoneEnabled) {
             guard model.microphoneEnabled else { return }
             while !Task.isCancelled {
-                model.refreshMicrophones()
+                await model.refreshMicrophones()
                 do { try await Task.sleep(for: .seconds(2)) }
                 catch { return }
             }

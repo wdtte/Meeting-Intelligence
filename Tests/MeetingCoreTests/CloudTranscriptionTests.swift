@@ -90,7 +90,11 @@ private func writeCloudFixture(_ url: URL, values: [Float]) throws {
     #expect(result.segments.first?.source == .microphone)
     #expect(result.segments.first?.chunkID == chunk.id)
     #expect(result.usage?.inputTokens == 50)
+    #expect(result.usage?.modelName == "qwen-audio-3.1-asr-flash-filetrans")
+    #expect(result.usage?.keyID == APIUsageIdentity.keyID(for: "test-api-key"))
+    #expect(result.usage?.recordedAt != nil)
     #expect(await saved.values.map(\.phase) == [.submitting, .submitted])
+    #expect(await saved.values.last?.keyID == result.usage?.keyID)
     let requests = await http.requests
     #expect(requests.count == 7)
     #expect(requests[0].url?.host == "dashscope.aliyuncs.com")
@@ -110,10 +114,24 @@ private func writeCloudFixture(_ url: URL, values: [Float]) throws {
         .init(body: cloudText)
     ])
     let provider = QwenTranscriptionProvider(configuration: .init(), apiKey: "fixture", transport: http, pollWait: { _ in })
-    _ = try await provider.transcribe(.init(audioURL: URL(fileURLWithPath: "/does-not-exist.wav"), chunk: fixtureChunk(), locale: "zh-CN",
+    let result = try await provider.transcribe(.init(audioURL: URL(fileURLWithPath: "/does-not-exist.wav"), chunk: fixtureChunk(), locale: "zh-CN",
         checkpoint: .init(phase: .submitted, taskID: "already-paid")), checkpoint: { _ in Issue.record("must not submit again") })
+    #expect(result.usage?.keyID == nil)
     #expect(await http.requests.first?.url?.path == "/api/v1/tasks/already-paid")
     #expect(await http.requests.count == 2)
+}
+
+@Test func resumedCloudUsageKeepsOriginalKeyIdentityAfterKeyRotation() async throws {
+    let http = ScriptedHTTP([
+        .init(body: #"{"output":{"task_status":"SUCCEEDED","results":[{"subtask_status":"SUCCEEDED","transcription_url":"https://result.oss-cn-beijing.aliyuncs.com/result.json"}]}}"#),
+        .init(body: cloudText)
+    ])
+    let originalKeyID = APIUsageIdentity.keyID(for: "original-key")
+    let provider = QwenTranscriptionProvider(configuration: .init(), apiKey: "replacement-key", transport: http)
+    let result = try await provider.transcribe(.init(audioURL: URL(fileURLWithPath: "/unused.wav"), chunk: fixtureChunk(), locale: "zh-CN",
+        checkpoint: .init(phase: .submitted, taskID: "already-paid", keyID: originalKeyID)), checkpoint: { _ in Issue.record("must not resubmit") })
+    #expect(result.usage?.keyID == originalKeyID)
+    #expect(result.usage?.keyID != APIUsageIdentity.keyID(for: "replacement-key"))
 }
 
 @Test func ambiguousSubmissionAndFailedSubtasksNeverAutomaticallyResubmit() async throws {
@@ -495,7 +513,10 @@ func localOnlyRecordingCanAddCloudAfterRecordingWithoutRepeatingLocalWork(whileL
     #expect(done.cloud?.skippedSeconds == 0)
     #expect(done.segments.first { $0.chunkID == first.id }?.text == "local fallback")
     #expect(done.segments.first { $0.chunkID == second.id }?.text == "云端文字")
-    #expect(done.cloud?.jobs[first.id.uuidString]?.usage == nil)
+    // Missing token counts stay unknown even when the result carries model/date metadata.
+    #expect(done.cloud?.jobs[first.id.uuidString]?.usage?.inputTokens == nil)
+    #expect(done.cloud?.jobs[first.id.uuidString]?.usage?.outputTokens == nil)
+    #expect(done.cloud?.jobs[first.id.uuidString]?.usage?.keyID == nil)
     #expect(await http.requests.count == 3)
     let reopened = TranscriptionCoordinator(prepare: { $0 }, recognize: { _, _, _ in [] }, cloudFactory: factory)
     reopened.load(recording)

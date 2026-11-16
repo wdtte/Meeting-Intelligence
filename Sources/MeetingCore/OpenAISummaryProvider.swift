@@ -32,7 +32,8 @@ public struct OpenAISummaryProvider: SummaryProvider {
             throw SummaryRPCError.invalidResponse
         }
         guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw MeetingError.message("摘要服务未返回有效文本。") }
-        return ProviderSummary(text: result.text, model: result.model, usage: result.usage)
+        let usage = (result.usage ?? TranscriptionUsage()).attributed(modelName: result.model, apiKey: key)
+        return ProviderSummary(text: result.text, model: result.model, usage: usage)
     }
     private struct Result: Decodable {
         var text: String; var model: String; var meetingID: String; var inputFingerprint: String
