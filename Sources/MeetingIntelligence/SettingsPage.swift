@@ -5,11 +5,12 @@ struct SettingsPage: View {
     @Bindable var model: AppModel
     var body: some View {
         LightScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            LazyVStack(alignment: .leading, spacing: 28) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("设置").font(.system(size: 27, weight: .semibold))
                     Text("管理录音、转写、摘要服务与会议数据。").foregroundStyle(.secondary)
                 }
+                APIUsageDashboard(model: model).padding(28).settingsCard()
                 VStack(alignment: .leading, spacing: 24) {
                     Label("数据存储", systemImage: "internaldrive").font(.headline)
                     directoryRow("录音保存目录", icon: "waveform", url: model.storageSettings?.audioDirectory, kind: .audio)

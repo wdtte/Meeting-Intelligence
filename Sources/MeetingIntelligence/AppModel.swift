@@ -133,8 +133,13 @@ final class AppModel {
     var selectedMicrophoneUnavailable: Bool {
         !microphoneDeviceID.isEmpty && !microphoneDevices.contains { $0.id == microphoneDeviceID }
     }
-    func refreshMicrophones() {
-        if let devices = try? MicrophoneDevice.available(), devices != microphoneDevices {
+    func refreshMicrophones() async {
+        // HAL device queries may wait on audio drivers. Keep them off the UI actor.
+        let devices = await Task.detached(priority: .utility) {
+            try? MicrophoneDevice.available()
+        }.value
+        guard !Task.isCancelled, microphoneEnabled else { return }
+        if let devices, devices != microphoneDevices {
             microphoneDevices = devices
         }
     }

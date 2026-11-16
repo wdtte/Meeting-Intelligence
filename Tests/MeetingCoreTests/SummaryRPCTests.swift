@@ -94,4 +94,7 @@ func rustSummaryProviderIntegration() async throws {
     #expect(result.text == "结论：周五发布。")
     #expect(result.model == "fixture-chat")
     #expect(result.usage?.inputTokens == 21)
+    #expect(result.usage?.modelName == "fixture-chat")
+    #expect(result.usage?.keyID == APIUsageIdentity.keyID(for: "fixture-only-key"))
+    #expect(result.usage?.recordedAt != nil)
 }
