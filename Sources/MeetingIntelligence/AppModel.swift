@@ -18,7 +18,6 @@ final class AppModel {
     var elapsed: Double = 0
     var savedDuration: Double = 0
     var peak: Float = 0
-    var levels = [Float](repeating: 0, count: 90)
     var lastAudioAt: TimeInterval?
     var errorMessage: String?
     var libraryError: String?
@@ -303,7 +302,6 @@ final class AppModel {
                 self.playback.tick()
                 if self.state == .recording {
                     self.elapsed = max(0, ProcessInfo.processInfo.systemUptime - self.startedAt)
-                    self.levels.removeFirst(); self.levels.append(self.peak)
                     self.peak *= 0.75
                     self.microphonePeak *= 0.75
                 }
@@ -362,7 +360,6 @@ final class AppModel {
         recoveringAudioDevice = false
         elapsed = 0; savedDuration = 0; peak = 0; lastAudioAt = nil
         microphonePeak = 0; microphoneLastAudioAt = nil; microphoneWarning = nil; transcriptionNotice = nil
-        levels = [Float](repeating: 0, count: 90)
         do {
             if microphoneEnabled {
                 let granted = await AVCaptureDevice.requestAccess(for: .audio)
@@ -400,7 +397,7 @@ final class AppModel {
             savedDuration = max(savedDuration, meter.savedDuration)
             if meter.peak > 0.001 { microphoneLastAudioAt = ProcessInfo.processInfo.systemUptime }
         case .meter(let meter):
-            peak = max(peak, meter.peak); savedDuration = meter.savedDuration
+            peak = max(peak, meter.peak); savedDuration = max(savedDuration, meter.savedDuration)
             if meter.peak > 0.001 { lastAudioAt = ProcessInfo.processInfo.systemUptime }
         case .stopped(let recording):
             recoveringAudioDevice = false

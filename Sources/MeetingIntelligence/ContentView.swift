@@ -78,7 +78,7 @@ struct ContentView: View {
             GeometryReader { viewport in
                 VStack(spacing: 0) {
                     Group {
-                        if model.isBusy { recordingView }
+                        if model.isBusy { LiveRecordingView(model: model) }
                         else if model.page == .settings { SettingsPage(model: model) }
                         else if let recording = model.selectedRecording { detail(recording) }
                         else { setupView }
@@ -175,46 +175,6 @@ struct ContentView: View {
             }.padding(40).frame(maxWidth: 820)
         }
     }
-    private var recordingView: some View {
-        LightScrollView {
-            VStack(spacing: 28) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("新的会议录音").font(.title2.weight(.semibold))
-                        Label(model.captureName, systemImage: "speaker.wave.2").foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Label(model.state == .recording ? "录制中" : model.state == .preparing ? "准备中" : "保存中", systemImage: "record.circle.fill")
-                        .font(.callout).foregroundStyle(.red)
-                }
-                VStack(spacing: 22) {
-                    Image(systemName: "waveform").font(.system(size: 32)).foregroundStyle(.red)
-                        .frame(width: 72, height: 72).background(.red.opacity(0.07), in: Circle())
-                    Text(AudioTimeline.clock(model.elapsed)).font(.system(size: 48, weight: .light, design: .monospaced))
-                    Text(model.inputStatus).font(.callout).foregroundStyle(.secondary)
-                    if model.microphoneEnabled {
-                        HStack {
-                            Image(systemName: model.microphoneWarning == nil ? "mic.fill" : "mic.slash")
-                            Text(model.microphoneStatus)
-                            if model.microphoneWarning == nil {
-                                ProgressView(value: Double(model.microphonePeak)).frame(width: 100)
-                            }
-                        }.font(.callout).foregroundStyle(model.microphoneWarning == nil ? Color.secondary : .orange)
-                    }
-                    LevelWaveform(levels: model.levels).frame(height: 75).accessibilityLabel("系统音频音量 \(Int(model.peak * 100))%")
-                    Text(model.savedDuration > 0 ? "已完成保存 \(AudioTimeline.clock(model.savedDuration))" : "首个音频片段写入后将显示保存进度")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button { Task { await model.stop() } } label: {
-                        Label("结束录音", systemImage: "stop.fill").padding(.horizontal, 20).padding(.vertical, 7)
-                    }.buttonStyle(.borderedProminent).tint(.red).disabled(model.state != .recording)
-                }.padding(30).card()
-                if let id = model.activeRecordingID {
-                    TranscriptPanel(model: model, recordingID: id, live: true)
-                        .frame(height: 260).padding(22).card()
-                }
-            }.padding(36).frame(maxWidth: .infinity)
-        }
-    }
     private func detail(_ recording: Recording) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
@@ -266,21 +226,6 @@ struct ContentView: View {
 
 }
 
-private struct LevelWaveform: View {
-    let levels: [Float]
-    var body: some View {
-        GeometryReader { geometry in
-            Canvas { context, size in
-                let step = size.width / Double(max(1, levels.count))
-                for (index, level) in levels.enumerated() {
-                    let height = max(2, Double(sqrt(max(0, level))) * size.height)
-                    let rect = CGRect(x: Double(index) * step, y: (size.height - height) / 2, width: max(1, step - 3), height: height)
-                    context.fill(Path(roundedRect: rect, cornerRadius: 2), with: .color(.red.opacity(level > 0.001 ? 0.8 : 0.15)))
-                }
-            }.frame(width: geometry.size.width, height: geometry.size.height)
-        }
-    }
-}
 private extension View {
     func card() -> some View {
         background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))

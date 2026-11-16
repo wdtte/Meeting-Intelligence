@@ -17,8 +17,8 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("DualTrack-\(UUID())")
     defer { try? FileManager.default.removeItem(at: root) }
     let store = try RecordingStore(root: root)
-    let app = makeBuffer(rate: 48000, channels: 2, value: 0.25)
-    let mic = makeBuffer(rate: 24000, channels: 1, value: 0.5)
+    let app = makeBuffer(rate: 48000, channels: 2, value: 0.05)
+    let mic = makeBuffer(rate: 24000, channels: 1, value: 0.08)
     let writer = try ChunkWriter(recording: Recording(title: "Dual", applicationName: "Fixture", bundleIdentifier: "fixture"), store: store, format: app.format, segmentDuration: 0.2)
     _ = try writer.append(app, at: 0.1)
     _ = try writer.append(mic, at: 0.15, source: .microphone)
@@ -34,7 +34,7 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
         let file = try AVAudioFile(forReading: store.audioURL(recording: result.id, fileName: chunk.fileName))
         let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: UInt32(file.length))!
         try file.read(into: buffer)
-        #expect(abs(buffer.floatChannelData![0][20] - (chunk.audioSource == .microphone ? 0.5 : 0.25)) < 0.0001)
+        #expect(abs(buffer.floatChannelData![0][20] - (chunk.audioSource == .microphone ? 0.08 : 0.05)) < 0.0001)
         #expect(file.processingFormat.sampleRate == (chunk.audioSource == .microphone ? 24000 : 48000))
     }
     #expect(try store.loadAll().first == result)
@@ -111,8 +111,8 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("DualPlayback-\(UUID())")
     defer { try? FileManager.default.removeItem(at: root) }
     let store = try RecordingStore(root: root)
-    let app = makeBuffer(rate: 48000, channels: 2, value: 0.25)
-    let mic = makeBuffer(rate: 24000, channels: 1, value: 0.5)
+    let app = makeBuffer(rate: 48000, channels: 2, value: 0.05)
+    let mic = makeBuffer(rate: 24000, channels: 1, value: 0.08)
     let writer = try ChunkWriter(recording: Recording(title: "Mix", applicationName: "Fixture", bundleIdentifier: "fixture"), store: store, format: app.format)
     _ = try writer.append(app, at: 0.1)
     _ = try writer.append(mic, at: 0.15, source: .microphone)
@@ -134,9 +134,9 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
         #expect(status == .success)
         samples.append(contentsOf: UnsafeBufferPointer(start: output.floatChannelData![0], count: Int(output.frameLength)))
     }
-    #expect(abs(samples[600] - 0.25) < 0.01)
-    #expect(abs(samples[2500] - 0.75) < 0.01)
-    #expect(abs(samples[5000] - 0.5) < 0.01)
+    #expect(abs(samples[600] - 0.05) < 0.01)
+    #expect(abs(samples[2500] - 0.13) < 0.01)
+    #expect(abs(samples[5000] - 0.08) < 0.01)
     #expect(abs(samples[7500]) < 0.01)
 }
 
