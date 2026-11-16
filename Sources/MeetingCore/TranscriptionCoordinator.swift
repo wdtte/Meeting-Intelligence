@@ -257,6 +257,8 @@ public final class TranscriptionCoordinator {
     private func startSummary(_ recording: Recording, retry: Bool = false) {
         guard canSummarize(recording), summaryTasks[recording.id] == nil,
               let path = recording.transcriptPath, var document = documents[recording.id] else { return }
+        // Local-only transcripts require an explicit request to spend summary tokens.
+        guard retry || (recording.cloudTranscription != nil && document.cloud?.status == "completed") else { return }
         if !retry, document.currentSummary != nil || ["failed", "interrupted"].contains(document.summary?.status ?? "") { return }
         let url = URL(fileURLWithPath: path)
         // A corrupt or replaced file must not be overwritten by in-memory results.

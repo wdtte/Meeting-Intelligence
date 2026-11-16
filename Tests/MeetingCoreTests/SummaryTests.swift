@@ -28,7 +28,7 @@ private struct SummaryFixture {
     var recording: Recording
     var document: TranscriptDocument
     var url: URL { URL(fileURLWithPath: recording.transcriptPath!) }
-    init() throws {
+    init(cloudCompleted: Bool = false) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("SummaryTests-\(UUID())")
         store = try RecordingStore(root: root)
         recording = Recording(title: "摘要测试", applicationName: "Fixture", bundleIdentifier: "fixture")
@@ -38,6 +38,11 @@ private struct SummaryFixture {
         document = TranscriptDocument(recordingID: recording.id, locale: "zh-CN")
         document.status = "completed"
         try document.commit([TranscriptSegment(chunkID: recording.chunks[0].id, source: .application, start: 0, end: 1, text: "周五发布，负责人未指定。")], for: recording.chunks[0])
+        if cloudCompleted {
+            recording.cloudTranscription = CloudTranscriptionConfiguration()
+            document.cloud = CloudTranscriptionProgress(configuration: recording.cloudTranscription!)
+            document.cloud?.status = "completed"
+        }
         try document.save(to: URL(fileURLWithPath: recording.transcriptPath!))
     }
     func clean() { try? FileManager.default.removeItem(at: root) }
@@ -80,8 +85,8 @@ private struct SummaryFixture {
     #expect(fixture.document.summary == nil)
 }
 
-@Test @MainActor func summaryRunsOnceAfterLocalCompletionAndPersistsWithTranscript() async throws {
-    let fixture = try SummaryFixture(); defer { fixture.clean() }
+@Test @MainActor func summaryRunsOnceAfterCloudCompletionAndPersistsWithTranscript() async throws {
+    let fixture = try SummaryFixture(cloudCompleted: true); defer { fixture.clean() }
     let provider = SummaryFixtureProvider()
     let tested = summaryCoordinator(provider)
     tested.load(fixture.recording)
@@ -96,8 +101,77 @@ private struct SummaryFixture {
     #expect(await provider.requests.count == 1)
 }
 
+@Test(arguments: [false, true]) @MainActor
+func localOnlySummaryRequiresManualRequest(savedTranscript: Bool) async throws {
+    var fixture = try SummaryFixture(); defer { fixture.clean() }
+    let segments = fixture.document.segments
+    if !savedTranscript {
+        fixture.document = TranscriptDocument(recordingID: fixture.recording.id, locale: "zh-CN")
+        try fixture.document.save(to: fixture.url)
+    }
+    let provider = SummaryFixtureProvider()
+    let coordinator = TranscriptionCoordinator(prepare: { $0 }, recognize: { _, _, _ in segments }, summaryFactory: { provider })
+    coordinator.load(fixture.recording)
+    coordinator.submit(fixture.recording, store: fixture.store)
+    await coordinator.wait(for: fixture.recording.id)
+    #expect(coordinator.documents[fixture.recording.id]?.status == "completed")
+    #expect(coordinator.canSummarize(fixture.recording))
+    #expect(coordinator.documents[fixture.recording.id]?.summary == nil)
+    #expect(await provider.requests.isEmpty)
+
+    // Reopening or resubmitting a local transcript must not spend tokens either.
+    coordinator.load(fixture.recording)
+    coordinator.submit(fixture.recording, store: fixture.store)
+    await coordinator.wait(for: fixture.recording.id)
+    #expect(await provider.requests.isEmpty)
+    #expect(try TranscriptDocument.load(from: fixture.url, recordingID: fixture.recording.id).summary == nil)
+
+    coordinator.generateSummary(fixture.recording)
+    await coordinator.wait(for: fixture.recording.id)
+    #expect(await provider.requests.count == 1)
+    #expect(coordinator.documents[fixture.recording.id]?.currentSummary != nil)
+    #expect(try TranscriptDocument.load(from: fixture.url, recordingID: fixture.recording.id).currentSummary != nil)
+
+    coordinator.submit(fixture.recording, store: fixture.store)
+    await coordinator.wait(for: fixture.recording.id)
+    #expect(await provider.requests.count == 1)
+}
+
+private struct SummaryCloudFixtureProvider: TranscriptionProvider {
+    let id = TranscriptionProviderID.qwen
+    let engine = "fixture-cloud"
+    let failsPreparation: Bool
+    func prepare(locale: String) async throws -> String {
+        if failsPreparation { throw MeetingError.message("fixture cloud failure") }
+        return locale
+    }
+    func transcribe(_ request: TranscriptionRequest, checkpoint: @escaping TranscriptionCheckpointHandler) async throws -> ProviderTranscription {
+        throw MeetingError.message("completed cloud jobs must not be submitted again")
+    }
+}
+
+@Test(arguments: [false, true]) @MainActor
+func summaryOnlyStartsAutomaticallyAfterCloudPipelineCompletes(cloudFails: Bool) async throws {
+    var fixture = try SummaryFixture(cloudCompleted: true); defer { fixture.clean() }
+    fixture.document.cloud?.status = "interrupted"
+    var job = CloudChunkJob()
+    job.completed = true
+    fixture.document.cloud?.jobs[fixture.recording.chunks[0].id.uuidString] = job
+    try fixture.document.save(to: fixture.url)
+    let provider = SummaryFixtureProvider()
+    let coordinator = TranscriptionCoordinator(prepare: { $0 }, recognize: { _, _, _ in
+        throw MeetingError.message("saved chunks must not be transcribed again")
+    }, cloudFactory: { _ in SummaryCloudFixtureProvider(failsPreparation: cloudFails) }, summaryFactory: { provider })
+    coordinator.load(fixture.recording)
+    coordinator.submit(fixture.recording, store: fixture.store)
+    await coordinator.wait(for: fixture.recording.id)
+    #expect(coordinator.documents[fixture.recording.id]?.cloud?.status == (cloudFails ? "failed" : "completed"))
+    #expect(await provider.requests.count == (cloudFails ? 0 : 1))
+    #expect((coordinator.documents[fixture.recording.id]?.currentSummary != nil) == !cloudFails)
+}
+
 @Test @MainActor func summaryFailureDoesNotFailTranscriptionAndOnlyExplicitRetryResubmits() async throws {
-    let fixture = try SummaryFixture(); defer { fixture.clean() }
+    let fixture = try SummaryFixture(cloudCompleted: true); defer { fixture.clean() }
     let provider = SummaryFixtureProvider(failures: 1), coordinator = summaryCoordinator(provider)
     coordinator.load(fixture.recording)
     coordinator.submit(fixture.recording, store: fixture.store)
