@@ -114,7 +114,9 @@ struct TranscriptPanel: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }.font(.caption).foregroundStyle(.secondary)
                     }
-                }.padding(.horizontal, live ? 0 : 4).padding(.vertical, live ? 8 : 16)
+                }.padding(.horizontal, live ? 16 : 4).padding(.vertical, live ? 12 : 16)
+
+                if live { Divider().padding(.horizontal, 16) }
 
                 if segments.isEmpty {
                     VStack(spacing: 10) {
@@ -133,7 +135,8 @@ struct TranscriptPanel: View {
                                     model.playSegment(segment)
                                 }.id(segment.id)
                             }
-                        }.padding(.top, 2).padding(.bottom, 16)
+                        }.padding(.horizontal, live ? 4 : 0)
+                            .padding(.top, 2).padding(.bottom, 16)
                     }
                     .frame(minHeight: 0, maxHeight: .infinity)
                     .onChange(of: playbackSegmentID, initial: true) { _, _ in
@@ -145,7 +148,7 @@ struct TranscriptPanel: View {
                     .onChange(of: model.playback.isPlaying) { _, playing in
                         if !live && playing && followPlayback { revealPlayback(proxy) }
                     }
-                    .onChange(of: segments.last?.id) { _, id in
+                    .onChange(of: segments.last?.id, initial: true) { _, id in
                         if live && model.followTranscript, let id { proxy.scrollTo(id, anchor: .bottom) }
                     }
                     .onChange(of: model.followTranscript) { _, follow in
@@ -226,6 +229,7 @@ struct TranscriptPanel: View {
                 }
                 if !live, !chunks.isEmpty {
                     ProgressView(value: Double(completed), total: Double(chunks.count))
+                        .controlSize(.mini)
                         .accessibilityLabel("云端转写进度")
                 }
                 if let error = cloud?.error {

@@ -8,12 +8,12 @@ import Synchronization
 private func temporaryStore() throws -> RecordingStore {
     try RecordingStore(root: FileManager.default.temporaryDirectory.appendingPathComponent("MeetingIntelligenceTests-\(UUID())"))
 }
-private func sampleBuffer(frames: UInt32 = 4800) -> AVAudioPCMBuffer {
+private func sampleBuffer(frames: UInt32 = 4800, amplitude: Float = 0.4) -> AVAudioPCMBuffer {
     let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
     let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
     buffer.frameLength = frames
     for channel in 0..<2 {
-        for index in 0..<Int(frames) { buffer.floatChannelData![channel][index] = Float(sin(Double(index) * 0.1)) * 0.4 }
+        for index in 0..<Int(frames) { buffer.floatChannelData![channel][index] = Float(sin(Double(index) * 0.1)) * amplitude }
     }
     return buffer
 }
@@ -23,7 +23,7 @@ private func meeting() -> Recording {
 
 @Test func chunkRoundTripPreservesOffsetsAndGaps() throws {
     let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
-    let buffer = sampleBuffer()
+    let buffer = sampleBuffer(amplitude: 0.10)
     let writer = try ChunkWriter(recording: meeting(), store: store, format: buffer.format, segmentDuration: 0.2)
     _ = try writer.append(buffer, at: 0.3)
     _ = try writer.append(buffer, at: 0.4)
@@ -58,44 +58,69 @@ private func meeting() -> Recording {
     #expect(try store.loadAll(recover: true).first == recovered)
 }
 
-@Test func checkpointRecoversQuietMicrophoneWithoutChangingSystemAudioOrNormalInput() throws {
+@Test func savedAudioBalancesTwoSourcesWhileMeterReportsUnprocessedInput() throws {
     let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
-    let quiet = sampleBuffer()
-    // Roughly match the low capture seen before switching to a headset:
-    // a short burst of speech, ~-54 dBFS peak with ~17 dB of crest factor.
-    for channel in 0..<2 {
-        for frame in 0..<Int(quiet.frameLength) {
-            quiet.floatChannelData![channel][frame] = frame < 200 ? quiet.floatChannelData![channel][frame] * 0.005 : 0
+    let system = levelFixture(peak: 0.8, interleaved: false)
+    let microphone = levelFixture(peak: 0.003, interleaved: true)
+    let writer = try ChunkWriter(recording: meeting(), store: store, format: system.format)
+    #expect(abs(try writer.append(system, at: 0).peak - 0.8) < 0.0001)
+    #expect(abs(try writer.append(microphone, at: 0.01, source: .microphone).peak - 0.003) < 0.0001)
+    try writer.checkpoint()
+    let recording = try writer.finish()
+    #expect(recording.chunks.map(\.offset) == [0, 0.01])
+    #expect(recording.chunks.map(\.audioSource) == [.application, .microphone])
+    let saved = try recording.chunks.map { try readLevel($0, recording: recording, store: store) }
+    #expect(saved.allSatisfy { abs($0.rmsDB + 23) < 1 && $0.peak < 0.12 })
+}
+
+@Test func levelingDoesNotBoostSteadyNoiseAndLeavesRoomForLoudTracksToOverlap() throws {
+    let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
+    let loud = levelFixture(peak: 0.99, interleaved: false, transient: true)
+    let noise = levelFixture(peak: 0.002, interleaved: false, burst: false)
+    let silence = levelFixture(peak: 0, interleaved: false)
+    let writer = try ChunkWriter(recording: meeting(), store: store, format: loud.format)
+    _ = try writer.append(loud, at: 0)
+    _ = try writer.append(loud, at: 0, source: .microphone)
+    try writer.checkpoint()
+    _ = try writer.append(noise, at: 1, source: .microphone)
+    _ = try writer.append(silence, at: 1)
+    let recording = try writer.finish()
+    let levels = try recording.chunks.map { try readLevel($0, recording: recording, store: store) }
+    #expect((0.43...0.45).contains(levels[0].peak))
+    #expect((0.43...0.45).contains(levels[1].peak))
+    #expect(levels[0].peak + levels[1].peak < 0.9)
+    #expect(abs(levels[2].peak - 0.002) < 0.00005)
+    #expect(levels[3].peak == 0)
+}
+
+private func levelFixture(peak: Float, interleaved: Bool, burst: Bool = true,
+                          transient: Bool = false) -> AVAudioPCMBuffer {
+    let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: interleaved)!
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000)!
+    buffer.frameLength = 48_000
+    let channels = buffer.floatChannelData!
+    for frame in 0..<Int(buffer.frameLength) {
+        let tone = Float(sin(Double(frame) * .pi / 12))
+        let sample = if transient && frame == 100 { peak }
+            else if burst && frame >= 7200 { Float(0) }
+            else { tone * peak * (transient ? 0.01 : 1) }
+        for channel in 0..<2 {
+            if interleaved { channels[0][frame * 2 + channel] = sample }
+            else { channels[channel][frame] = sample }
         }
     }
-    let normal = sampleBuffer()
-    let silence = sampleBuffer()
-    for channel in 0..<2 {
-        for frame in 0..<Int(silence.frameLength) { silence.floatChannelData![channel][frame] = 0 }
-    }
-    let writer = try ChunkWriter(recording: meeting(), store: store, format: quiet.format)
-    _ = try writer.append(quiet, at: 0)
-    _ = try writer.append(quiet, at: 0.01, source: .microphone)
-    try writer.checkpoint()
-    _ = try writer.append(normal, at: 0.25, source: .microphone)
-    try writer.checkpoint()
-    _ = try writer.append(silence, at: 0.5, source: .microphone)
-    let recording = try writer.finish()
-    #expect(recording.chunks.map(\.offset) == [0, 0.01, 0.25, 0.5])
-    #expect(recording.chunks.allSatisfy { $0.isComplete && abs($0.duration - 0.1) < 0.00001 })
+    return buffer
+}
 
-    let peaks = try recording.chunks.map { chunk in
-        let file = try AVAudioFile(forReading: store.audioURL(recording: recording.id, fileName: chunk.fileName))
-        #expect(file.length == 4800)
-        let read = try #require(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4800))
-        try file.read(into: read)
-        let frames = UnsafeBufferPointer(start: read.floatChannelData![0], count: Int(read.frameLength))
-        return frames.map(abs).max() ?? 0
-    }
-    #expect(abs(peaks[0] - 0.002) < 0.0001)
-    #expect((0.18 ... 0.22).contains(peaks[1]))
-    #expect(abs(peaks[2] - 0.4) < 0.0001)
-    #expect(peaks[3] == 0)
+private func readLevel(_ chunk: AudioChunk, recording: Recording, store: RecordingStore) throws -> (peak: Float, rmsDB: Double) {
+    let file = try AVAudioFile(forReading: store.audioURL(recording: recording.id, fileName: chunk.fileName))
+    #expect(file.length == 48_000)
+    #expect(chunk.isComplete && abs(chunk.duration - 1) < 0.00001)
+    let read = try #require(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 48_000))
+    try file.read(into: read)
+    let samples = UnsafeBufferPointer(start: read.floatChannelData![0], count: Int(read.frameLength))
+    let energy = samples.prefix(7200).reduce(0.0) { $0 + Double($1) * Double($1) }
+    return (samples.map(abs).max() ?? 0, 10 * log10(energy / 7200))
 }
 
 @Test func recoveryHandlesRenameBeforeManifestCommit() throws {
@@ -229,7 +254,7 @@ private final class SharedRing: @unchecked Sendable {
     let store = try temporaryStore(); defer { try? FileManager.default.removeItem(at: store.root) }
     let buffer = sampleBuffer()
     // Constant samples make audible data distinguishable from scheduled silence.
-    for channel in 0..<2 { for index in 0..<Int(buffer.frameLength) { buffer.floatChannelData![channel][index] = 0.25 } }
+    for channel in 0..<2 { for index in 0..<Int(buffer.frameLength) { buffer.floatChannelData![channel][index] = 0.08 } }
     let writer = try ChunkWriter(recording: meeting(), store: store, format: buffer.format, segmentDuration: 0.1)
     _ = try writer.append(buffer, at: 0.1)
     _ = try writer.append(buffer, at: 0.3)
@@ -258,14 +283,14 @@ private final class SharedRing: @unchecked Sendable {
     let whole = try render(from: 0, frames: 19200)
     guard whole.count == 19200 else { return }
     #expect(abs(whole[2400]) < 0.001) // initial offset
-    #expect(abs(whole[7200] - 0.25) < 0.001)
+    #expect(abs(whole[7200] - 0.08) < 0.001)
     #expect(abs(whole[12000]) < 0.001) // capture gap
-    #expect(abs(whole[16800] - 0.25) < 0.001)
+    #expect(abs(whole[16800] - 0.08) < 0.001)
     let seek = try render(from: 0.15, frames: 12000)
     guard seek.count == 12000 else { return }
-    #expect(abs(seek[1200] - 0.25) < 0.001)
+    #expect(abs(seek[1200] - 0.08) < 0.001)
     #expect(abs(seek[4800]) < 0.001)
-    #expect(abs(seek[9600] - 0.25) < 0.001)
+    #expect(abs(seek[9600] - 0.08) < 0.001)
 }
 
 @Test func storageDirectoriesPersistAndPreserveOldRecordingLocations() throws {

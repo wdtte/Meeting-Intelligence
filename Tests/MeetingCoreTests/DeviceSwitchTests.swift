@@ -18,10 +18,10 @@ private func routeBuffer(rate: Double, channels: AVAudioChannelCount, value: Flo
     let store = try RecordingStore(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
     defer { try? FileManager.default.removeItem(at: store.root) }
     let recording = Recording(title: "Switch", applicationName: "Fixture", bundleIdentifier: "fixture")
-    let speaker = routeBuffer(rate: 48000, channels: 2, value: 0.2)
-    let builtInMic = routeBuffer(rate: 48000, channels: 1, value: 0.3)
-    let headset = routeBuffer(rate: 24000, channels: 1, value: 0.4)
-    let headphones = routeBuffer(rate: 44100, channels: 2, value: 0.5)
+    let speaker = routeBuffer(rate: 48000, channels: 2, value: 0.05)
+    let builtInMic = routeBuffer(rate: 48000, channels: 1, value: 0.06)
+    let headset = routeBuffer(rate: 24000, channels: 1, value: 0.07)
+    let headphones = routeBuffer(rate: 44100, channels: 2, value: 0.08)
     let writer = try ChunkWriter(recording: recording, store: store, format: speaker.format)
     _ = try writer.append(speaker, at: 0)
     _ = try writer.append(builtInMic, at: 0.02, source: .microphone)
@@ -57,7 +57,7 @@ private func routeBuffer(rate: Double, channels: AVAudioChannelCount, value: Flo
         #expect(file.length == Int64(chunk.sampleRate / 10))
         let read = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 1)!
         try file.read(into: read, frameCount: 1)
-        let expected: [Float] = [0.2, 0.3, 0.4, 0.4, 0.5, 0.4]
+        let expected: [Float] = [0.05, 0.06, 0.07, 0.07, 0.08, 0.07]
         #expect(abs(read.floatChannelData![0][0] - expected[index]) < 0.0001)
     }
 }
@@ -65,8 +65,8 @@ private func routeBuffer(rate: Double, channels: AVAudioChannelCount, value: Flo
 @Test func deviceSwitchFormatChangeClosesOldSegmentAndStillRejectsClockReset() throws {
     let store = try RecordingStore(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
     defer { try? FileManager.default.removeItem(at: store.root) }
-    let old = routeBuffer(rate: 48000, channels: 2, value: 0.2)
-    let new = routeBuffer(rate: 16000, channels: 1, value: 0.4)
+    let old = routeBuffer(rate: 48000, channels: 2, value: 0.05)
+    let new = routeBuffer(rate: 16000, channels: 1, value: 0.07)
     let writer = try ChunkWriter(recording: Recording(title: "Switch", applicationName: "Test", bundleIdentifier: "test"),
                                  store: store, format: old.format)
     _ = try writer.append(old, at: 5)
@@ -97,10 +97,10 @@ private func routeBuffer(rate: Double, channels: AVAudioChannelCount, value: Flo
 @Test func deviceSwitchPlaybackMixesFormatsPreservesGapsAndSeeks() throws {
     let store = try RecordingStore(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
     defer { try? FileManager.default.removeItem(at: store.root) }
-    let app = routeBuffer(rate: 48000, channels: 2, value: 0.2)
-    let mic = routeBuffer(rate: 48000, channels: 1, value: 0.3)
-    let changedApp = routeBuffer(rate: 44100, channels: 1, value: 0.4)
-    let changedMic = routeBuffer(rate: 24000, channels: 1, value: 0.5)
+    let app = routeBuffer(rate: 48000, channels: 2, value: 0.05)
+    let mic = routeBuffer(rate: 48000, channels: 1, value: 0.06)
+    let changedApp = routeBuffer(rate: 44100, channels: 1, value: 0.07)
+    let changedMic = routeBuffer(rate: 24000, channels: 1, value: 0.08)
     let writer = try ChunkWriter(recording: Recording(title: "Switch playback", applicationName: "Fixture", bundleIdentifier: "fixture"),
                                  store: store, format: app.format)
     for (time, application, microphone) in [(0.1, app, mic), (0.4, changedApp, changedMic), (0.7, app, mic)] {
@@ -140,21 +140,21 @@ private func routeBuffer(rate: Double, channels: AVAudioChannelCount, value: Flo
     }
     let mixed = try render(from: 0, source: nil, delayedEnqueue: true)
     #expect(abs(mixed[2400]) < 0.001)
-    #expect(abs(mixed[7200] - 0.5) < 0.005)
+    #expect(abs(mixed[7200] - 0.11) < 0.005)
     #expect(abs(mixed[14400]) < 0.001)
-    #expect(abs(mixed[21600] - 0.9) < 0.005)
+    #expect(abs(mixed[21600] - 0.15) < 0.005)
     #expect(abs(mixed[28800]) < 0.001)
-    #expect(abs(mixed[36000] - 0.5) < 0.005)
+    #expect(abs(mixed[36000] - 0.11) < 0.005)
     let seek = try render(from: 0.43, source: nil)
-    #expect(abs(seek[960] - 0.9) < 0.005)
+    #expect(abs(seek[960] - 0.15) < 0.005)
     #expect(abs(seek[8160]) < 0.001)
-    #expect(abs(seek[15360] - 0.5) < 0.005)
+    #expect(abs(seek[15360] - 0.11) < 0.005)
     let microphone = try render(from: 0, source: .microphone)
-    #expect(abs(microphone[7200] - 0.3) < 0.005)
-    #expect(abs(microphone[21600] - 0.5) < 0.005)
+    #expect(abs(microphone[7200] - 0.06) < 0.005)
+    #expect(abs(microphone[21600] - 0.08) < 0.005)
     let application = try render(from: 0, source: .application)
-    #expect(abs(application[7200] - 0.2) < 0.005)
-    #expect(abs(application[21600] - 0.4) < 0.005)
+    #expect(abs(application[7200] - 0.05) < 0.005)
+    #expect(abs(application[21600] - 0.07) < 0.005)
 }
 
 // Explicit local validation only: render an existing recording to memory without

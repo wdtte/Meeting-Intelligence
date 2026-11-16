@@ -15,6 +15,21 @@ public enum CaptureEvent: Sendable {
 
 // The serial queue owns every mutable property; only the C ring crosses into HAL.
 public final class ProcessAudioCapture: @unchecked Sendable {
+    private struct MeterWindow {
+        var lastSent: TimeInterval = 0
+        var peak: Float = 0
+
+        mutating func sample(_ meter: AudioMeter, now: TimeInterval) -> AudioMeter? {
+            peak = max(peak, meter.peak)
+            guard now - lastSent >= 0.08 else { return nil }
+            var result = meter
+            result.peak = peak
+            peak = 0
+            lastSent = now
+            return result
+        }
+    }
+
     private let queue = DispatchQueue(label: "MeetingIntelligence.capture", qos: .userInitiated)
     private var micInput: MicrophoneInput?
     private var microphoneEnabled = false
@@ -32,7 +47,8 @@ public final class ProcessAudioCapture: @unchecked Sendable {
     private var writer: ChunkWriter?
     private var buffer: AVAudioPCMBuffer?
     private var epoch: UInt64 = 0
-    private var lastMeter: TimeInterval = 0
+    private var systemMeter = MeterWindow()
+    private var microphoneMeter = MeterWindow()
     private var started = false
     private var callback: (@Sendable (CaptureEvent) -> Void)?
 
@@ -117,7 +133,9 @@ public final class ProcessAudioCapture: @unchecked Sendable {
         MIRingSetStartTime(ring, UInt64.max)
         try Hardware.check(AudioDeviceCreateIOProcID(device, MIAudioIOProc, UnsafeMutableRawPointer(ring), &ioProc), "创建音频回调")
         try Hardware.check(AudioDeviceStart(device, ioProc), "开始系统音频录制")
-        started = true; lastMeter = 0
+        started = true
+        systemMeter = MeterWindow()
+        microphoneMeter = MeterWindow()
     }
     private func startTimer() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -260,8 +278,11 @@ public final class ProcessAudioCapture: @unchecked Sendable {
             let offset = AVAudioTime.seconds(forHostTime: packet.hostTime - epoch)
             let meter = try writer.append(buffer, at: offset, source: source)
             let now = ProcessInfo.processInfo.systemUptime
-            if source == .microphone { callback?(.microphoneMeter(meter)) }
-            else if now - lastMeter >= 0.08 { callback?(.meter(meter)); lastMeter = now }
+            if source == .microphone {
+                if let reading = microphoneMeter.sample(meter, now: now) { callback?(.microphoneMeter(reading)) }
+            } else if let reading = systemMeter.sample(meter, now: now) {
+                callback?(.meter(reading))
+            }
         }
     }
     @discardableResult private func finish(error: String? = nil) -> String? {
