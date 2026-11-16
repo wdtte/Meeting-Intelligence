@@ -90,7 +90,7 @@ struct SettingsPage: View {
                         Button("授权钥匙串访问…") { model.authorizeSummaryAPIKey() }.disabled(!model.summaryAPIKeySaved)
                     }
                     Text(model.summaryCredentialStatus).font(.caption).foregroundStyle(.secondary)
-                    Text("保存后，会议转写全部完成时自动将转写文字发送至此服务生成摘要。启用云端精校的会议会等待精校完成；历史会议可点击“生成摘要”。移除 Key 可停止后续自动摘要。")
+                    Text("配置后，仅在云端转写完成时自动生成摘要。仅本地转写的会议需点击“生成摘要”，避免自动消耗 Token。历史会议也可手动生成；移除 Key 可停止后续自动摘要。")
                         .font(.callout).foregroundStyle(.secondary)
                     Text("支持 OpenAI Chat Completions 协议，直接使用你填写的模型。DeepSeek 可填写 Base URL https://api.deepseek.com 和模型 deepseek-chat；也可使用服务支持的其他模型。Base URL 应包含服务要求的路径（如 /v1），本机服务可使用 HTTP。")
                         .font(.caption).foregroundStyle(.secondary)

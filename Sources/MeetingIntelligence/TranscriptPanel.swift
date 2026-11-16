@@ -224,7 +224,7 @@ struct TranscriptPanel: View {
             } else if let error = document?.summary?.error {
                 Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled)
             } else if document?.currentSummary == nil {
-                Text("配置摘要服务后，最终转写完成时自动生成；也可手动生成。")
+                Text("配置摘要服务后，云端转写完成时自动生成；仅本地转写需点击“生成摘要”。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
