@@ -36,7 +36,7 @@ The development environment has been verified with Swift 6.4.2 and Rust 1.100.0.
 
 #### Download a release
 
-Download an architecture-specific ZIP from [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases): choose `arm64` for Apple Silicon or `x86_64` for Intel. Extract it and move `Meeting Intelligence.app` into Applications. Releases require macOS 26 or later and include the Rust summary backend and `meeting` CLI. The `.zip.sha256` file contains the archive checksum.
+Download an architecture-specific DMG from [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases): choose `arm64` for Apple Silicon or `x86_64` for Intel. Open the DMG, drag `Meeting Intelligence.app` onto the Applications shortcut, then eject the disk image. A ZIP archive is also available. Releases require macOS 26 or later and include the Rust summary backend and `meeting` CLI. Each download has a matching `.sha256` checksum file.
 
 Release builds use ad-hoc signing and are not notarized by Apple. macOS may ask you to explicitly approve opening the app in System Settings → Privacy & Security. Only approve builds from sources you trust.
 
@@ -257,7 +257,7 @@ Keep `README.md` at the repository root and all other project Markdown documents
 
 ### Automated releases
 
-Every tag pushed to GitHub triggers `.github/workflows/release.yml`: run Swift and Rust tests, build separate Apple Silicon and Intel apps, then publish a GitHub Release with ZIPs, SHA-256 checksums, and generated release notes. Use `vX.Y.Z` version tags; `vX.Y.Z-rc.1` tags are marked as prereleases. Main-branch pushes and pull requests run Swift/Rust tests on Intel through a separate CI workflow. Use the Release workflow’s manual trigger for full dual-architecture validation. Toolchain-specific Swift/Cargo caches reduce repeated compilation; job summaries report queue and phase durations. See [AGENTS.md](AGENTS.md) for the release procedure and signing limitations.
+Every tag pushed to GitHub triggers `.github/workflows/release.yml`: run Swift and Rust tests, build separate Apple Silicon and Intel apps, then publish a GitHub Release with DMGs, ZIPs, SHA-256 checksums, and generated release notes. Use `vX.Y.Z` version tags; `vX.Y.Z-rc.1` tags are marked as prereleases. Main-branch pushes and pull requests run Swift/Rust tests on Intel through a separate CI workflow. Use the Release workflow’s manual trigger for full dual-architecture validation. Toolchain-specific Swift/Cargo caches reduce repeated compilation; job summaries report queue and phase durations. See [AGENTS.md](AGENTS.md) for the release procedure and signing limitations.
 
 ### License
 
@@ -299,7 +299,7 @@ This project is licensed under the [MIT License](LICENSE). Third-party dependenc
 
 #### 下载发布版本
 
-在 [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases) 下载对应架构的 ZIP：Apple Silicon 选择 `arm64`，Intel 选择 `x86_64`。解压后，将 `Meeting Intelligence.app` 移到“应用程序”。发布包要求 macOS 26 或更新版本，内含 Rust 摘要后端和 `meeting` CLI；`.zip.sha256` 文件提供压缩包校验值。
+在 [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases) 下载对应架构的 DMG：Apple Silicon 选择 `arm64`，Intel 选择 `x86_64`。打开 DMG，将 `Meeting Intelligence.app` 拖到“应用程序”快捷方式，然后推出磁盘映像。也提供 ZIP 压缩包。发布包要求 macOS 26 或更新版本，内含 Rust 摘要后端和 `meeting` CLI；每个下载文件都附带对应的 `.sha256` 校验文件。
 
 发布包使用 ad-hoc 签名，未经 Apple 公证。macOS 可能要求你到“系统设置 → 隐私与安全性”中明确允许打开；请只允许运行来自可信来源的构建。
 
@@ -505,7 +505,7 @@ cargo test --locked --manifest-path Helpers/summary/Cargo.toml
 
 ### 自动发布
 
-每次向 GitHub 推送 tag，都会触发 `.github/workflows/release.yml`：运行 Swift 和 Rust 测试，分别构建 Apple Silicon 与 Intel 应用，再创建 GitHub Release，上传 ZIP、SHA-256 校验文件及自动生成的更新日志。版本 tag 使用 `vX.Y.Z`；`vX.Y.Z-rc.1` 会标记为预发布。推送主分支或发起 Pull Request 时，独立 CI 仅在 Intel 上运行 Swift/Rust 测试；需要完整双架构验证时，可手动运行 Release 工作流。Swift/Cargo 缓存按实际工具链与架构隔离，任务摘要记录排队和各阶段耗时。发布步骤和签名限制见 [AGENTS.md](AGENTS.md)。
+每次向 GitHub 推送 tag，都会触发 `.github/workflows/release.yml`：运行 Swift 和 Rust 测试，分别构建 Apple Silicon 与 Intel 应用，再创建 GitHub Release，上传 DMG、ZIP、SHA-256 校验文件及自动生成的更新日志。版本 tag 使用 `vX.Y.Z`；`vX.Y.Z-rc.1` 会标记为预发布。推送主分支或发起 Pull Request 时，独立 CI 仅在 Intel 上运行 Swift/Rust 测试；需要完整双架构验证时，可手动运行 Release 工作流。Swift/Cargo 缓存按实际工具链与架构隔离，任务摘要记录排队和各阶段耗时。发布步骤和签名限制见 [AGENTS.md](AGENTS.md)。
 
 ### 开源协议
 
