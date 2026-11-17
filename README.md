@@ -257,7 +257,7 @@ Keep `README.md` at the repository root and all other project Markdown documents
 
 ### Automated releases
 
-Every tag pushed to GitHub triggers `.github/workflows/release.yml`: run Swift and Rust tests, build separate Apple Silicon and Intel apps, then publish a GitHub Release with ZIPs, SHA-256 checksums, and generated release notes. Use `vX.Y.Z` version tags; `vX.Y.Z-rc.1` tags are marked as prereleases. Main-branch pushes and pull requests also validate both builds. See [AGENTS.md](AGENTS.md) for the release procedure and signing limitations.
+Every tag pushed to GitHub triggers `.github/workflows/release.yml`: run Swift and Rust tests, build separate Apple Silicon and Intel apps, then publish a GitHub Release with ZIPs, SHA-256 checksums, and generated release notes. Use `vX.Y.Z` version tags; `vX.Y.Z-rc.1` tags are marked as prereleases. Main-branch pushes and pull requests run Swift/Rust tests on Intel through a separate CI workflow. Use the Release workflow’s manual trigger for full dual-architecture validation. Toolchain-specific Swift/Cargo caches reduce repeated compilation; job summaries report queue and phase durations. See [AGENTS.md](AGENTS.md) for the release procedure and signing limitations.
 
 ### License
 
@@ -505,7 +505,7 @@ cargo test --locked --manifest-path Helpers/summary/Cargo.toml
 
 ### 自动发布
 
-每次向 GitHub 推送 tag，都会触发 `.github/workflows/release.yml`：运行 Swift 和 Rust 测试，分别构建 Apple Silicon 与 Intel 应用，再创建 GitHub Release，上传 ZIP、SHA-256 校验文件及自动生成的更新日志。版本 tag 使用 `vX.Y.Z`；`vX.Y.Z-rc.1` 会标记为预发布。推送主分支或发起 Pull Request 也会验证两种架构的构建。发布步骤和签名限制见 [AGENTS.md](AGENTS.md)。
+每次向 GitHub 推送 tag，都会触发 `.github/workflows/release.yml`：运行 Swift 和 Rust 测试，分别构建 Apple Silicon 与 Intel 应用，再创建 GitHub Release，上传 ZIP、SHA-256 校验文件及自动生成的更新日志。版本 tag 使用 `vX.Y.Z`；`vX.Y.Z-rc.1` 会标记为预发布。推送主分支或发起 Pull Request 时，独立 CI 仅在 Intel 上运行 Swift/Rust 测试；需要完整双架构验证时，可手动运行 Release 工作流。Swift/Cargo 缓存按实际工具链与架构隔离，任务摘要记录排队和各阶段耗时。发布步骤和签名限制见 [AGENTS.md](AGENTS.md)。
 
 ### 开源协议
 

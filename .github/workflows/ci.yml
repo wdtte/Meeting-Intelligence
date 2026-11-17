@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test macOS (x86_64)
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up toolchain and cache
+        uses: ./.github/actions/setup-build
+
+      - name: Test Swift
+        run: ./scripts/test.sh
+
+      - name: Test Rust
+        run: cargo test --locked --manifest-path Helpers/summary/Cargo.toml
+
+      - name: Summarize phase timings
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_JOB_NAME: Test macOS (x86_64)
+        run: python3 scripts/ci-timing-summary.py

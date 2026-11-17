@@ -50,6 +50,12 @@ public final class PlaybackTracks {
             throw MeetingError.message("录音文件在加载后发生变化，请重新选择这条记录。")
         }
         try PlaybackSchedule.enqueue([(chunk, file)], on: track.player, from: position)
+        // Offline rendering can consume the entire look-ahead window before the
+        // file reader gets CPU time, especially when a new format lane is added.
+        // Wait for its initial disk data rather than rendering transient silence.
+        if engine.isInManualRenderingMode {
+            track.player.prepare(withFrameCount: 4096)
+        }
     }
 
     public func select(_ source: AudioSource?) {
