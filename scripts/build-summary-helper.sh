@@ -17,7 +17,14 @@ case "$(uname -m)" in
 esac
 flags=()
 if [[ "$configuration" == release ]]; then flags=(--release); fi
+edition="${MEETING_BUILD_EDITION:-standard}"
+case "$edition" in
+  standard) export MACOSX_DEPLOYMENT_TARGET=26.0 ;;
+  compatibility) export MACOSX_DEPLOYMENT_TARGET=15.0 ;;
+  *) print -u2 'MEETING_BUILD_EDITION must be standard or compatibility'; exit 2 ;;
+esac
+export CARGO_TARGET_DIR="$PWD/Helpers/summary/target/$edition"
 cargo build --locked --manifest-path Helpers/summary/Cargo.toml --target "$rust_target" "${flags[@]}"
 mkdir -p build
-cp "Helpers/summary/target/$rust_target/$configuration/meeting-summary" build/.meeting-summary.next
+cp "$CARGO_TARGET_DIR/$rust_target/$configuration/meeting-summary" build/.meeting-summary.next
 mv -f build/.meeting-summary.next build/meeting-summary

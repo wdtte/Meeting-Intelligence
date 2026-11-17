@@ -7,6 +7,7 @@ if [[ ! -d "$app_path" ]]; then
   exit 1
 fi
 codesign --verify --strict "$app_path"
+python3 scripts/verify-app.py "$app_path"
 app_path="${app_path:A}"
 if ! command -v node >/dev/null || [[ ! -d scripts/dmg/node_modules/appdmg ]]; then
   print -u2 'Packaging requires Node.js 24 and npm ci --prefix scripts/dmg.'
@@ -25,8 +26,11 @@ fi
 output_dir="${1:-$PWD/dist}"
 mkdir -p "$output_dir"
 output_dir="${output_dir:A}"
-archive="Meeting-Intelligence-$version-macos-$arch.zip"
-disk_image="Meeting-Intelligence-$version-macos-$arch.dmg"
+edition="$(/usr/libexec/PlistBuddy -c 'Print :MIBuildEdition' "$app_path/Contents/Info.plist")"
+suffix=""
+if [[ "$edition" == compatibility ]]; then suffix="-macos15-whisper"; fi
+archive="Meeting-Intelligence-$version-macos-$arch$suffix.zip"
+disk_image="Meeting-Intelligence-$version-macos-$arch$suffix.dmg"
 staging="$(mktemp -d "${TMPDIR:-/tmp}/meeting-release.XXXXXX")"
 trap 'rm -rf "$staging"' EXIT
 ditto "$app_path" "$staging/Meeting Intelligence.app"

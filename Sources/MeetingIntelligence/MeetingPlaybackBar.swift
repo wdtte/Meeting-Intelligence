@@ -107,8 +107,19 @@ struct MeetingPlaybackBar: View {
         }
         .frame(height: 44)
         .padding(.leading, 20).padding(.trailing, 18).padding(.vertical, 8)
-        .glassEffect(.regular.tint(colorScheme == .dark ? .black.opacity(0.18) : .white.opacity(0.72)), in: .capsule)
+        .modifier(PlaybackBarMaterial(colorScheme: colorScheme))
         .overlay(Capsule().strokeBorder(.primary.opacity(0.05), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.07), radius: 12, y: 4)
+    }
+}
+
+private struct PlaybackBarMaterial: ViewModifier {
+    let colorScheme: ColorScheme
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.glassEffect(.regular.tint(colorScheme == .dark ? .black.opacity(0.18) : .white.opacity(0.72)), in: .capsule)
+        } else {
+            content.background(.regularMaterial, in: Capsule())
+        }
     }
 }

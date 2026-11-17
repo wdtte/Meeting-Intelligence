@@ -9,4 +9,9 @@ flags=()
 if [[ -f "$testing_plugin" ]]; then
   flags=(-Xswiftc -load-plugin-library -Xswiftc "$testing_plugin")
 fi
-swift test --disable-xctest "${flags[@]}" "$@"
+edition="${MEETING_BUILD_EDITION:-standard}"
+case "$edition" in
+  standard|compatibility) ;;
+  *) print -u2 'MEETING_BUILD_EDITION must be standard or compatibility'; exit 2 ;;
+esac
+swift test --disable-xctest --scratch-path ".build/$edition" "${flags[@]}" "$@"
