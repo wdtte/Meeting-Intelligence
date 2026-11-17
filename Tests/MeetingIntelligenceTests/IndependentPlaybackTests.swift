@@ -9,14 +9,14 @@ import Testing
     let model: AppModel
     let records: [Recording]
 
-    init() throws {
+    init(count: Int = 2) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("IndependentPlayback-\(UUID())")
         let settingsStore = try StorageSettingsStore(base: root)
         let settings = try settingsStore.load()
         let store = try RecordingStore(root: settings.audioDirectory)
         let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
         var records: [Recording] = []
-        for index in 0..<2 {
+        for index in 0..<count {
             var recording = Recording(title: "Record \(index)", applicationName: "Fixture", bundleIdentifier: "fixture")
             recording.status = .completed
             recording.transcriptPath = settings.transcriptDirectory.appendingPathComponent("\(recording.id).json").path
@@ -44,6 +44,50 @@ import Testing
         model.playback = PlaybackCoordinator(engine: engine)
     }
     func clean() { model.playback.load(nil, store: nil); try? FileManager.default.removeItem(at: root) }
+}
+
+@Test @MainActor func upDownBrowseInSidebarOrderWithoutStartingOrSwitchingPlayback() throws {
+    let fixture = try PlaybackFixture(count: 3)
+    defer { fixture.clean() }
+    let model = fixture.model, records = model.recordings
+    #expect(!model.navigateRecording(.next))
+    model.select(records[0].id)
+    #expect(model.navigateRecording(.previous))
+    #expect(model.selectedID == records[0].id)
+    #expect(model.navigateRecording(.next))
+    #expect(model.selectedID == records[1].id)
+    #expect(model.playback.recordingID == nil)
+    #expect(!model.playback.isPlaying)
+    model.toggleRecordingPlayback(records[1].id)
+    model.playback.seek(to: 1)
+    #expect(model.navigateRecording(.next))
+    #expect(model.selectedID == records[2].id)
+    #expect(model.playback.recordingID == records[1].id)
+    #expect(model.playback.isPlaying)
+    #expect(model.playback.position == 1)
+    #expect(model.navigateRecording(.next))
+    #expect(model.selectedID == records[2].id)
+    model.playback.pause()
+    let position = model.playback.position
+    #expect(model.navigateRecording(.previous))
+    #expect(model.selectedID == records[1].id)
+    #expect(model.navigateRecording(.previous))
+    #expect(model.selectedID == records[0].id)
+    #expect(model.playback.recordingID == records[1].id)
+    #expect(!model.playback.isPlaying)
+    #expect(model.playback.position == position)
+    model.beginRename(records[0].id)
+    #expect(!model.navigateRecording(.next))
+    model.renamingRecordingID = nil
+    model.showSettings()
+    #expect(!model.navigateRecording(.next))
+    model.select(records[0].id)
+    model.state = .recording
+    #expect(!model.navigateRecording(.next))
+    model.state = .idle
+    model.errorMessage = "Fixture error"
+    #expect(!model.navigateRecording(.next))
+    #expect(model.selectedID == records[0].id)
 }
 
 @Test @MainActor func browsingRecordsAndSettingsNeverReplacesOrPausesCurrentPlayback() throws {

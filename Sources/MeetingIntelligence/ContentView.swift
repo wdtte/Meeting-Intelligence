@@ -20,49 +20,55 @@ struct ContentView: View {
                     Text("最近会议").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         .padding(.horizontal, 18)
                     GeometryReader { geometry in
-                        LightScrollView {
-                            LazyVStack(alignment: .leading, spacing: 4) {
-                                ForEach(model.recordings) { recording in
-                                    Button { model.select(recording.id) } label: {
-                                        VStack(alignment: .leading, spacing: 6) {
-                                            Text(recording.title)
-                                                .font(.system(size: 13, weight: .medium))
-                                                .lineLimit(1).truncationMode(.tail)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                            HStack(spacing: 6) {
-                                                HStack(spacing: 3) {
-                                                    Text(recording.startedAt.formatted(date: .abbreviated, time: .omitted))
-                                                        .lineLimit(1).truncationMode(.tail)
-                                                    Text("· \(AudioTimeline.clock(recording.duration))").fixedSize()
-                                                }.foregroundStyle(.secondary)
-                                                Spacer(minLength: 0)
-                                                if recording.status == .interrupted || recording.status == .failed {
-                                                    Label("需要检查", systemImage: "exclamationmark.circle")
-                                                        .foregroundStyle(.orange).fixedSize()
-                                                        .help(recording.note ?? "录音未正常完成，请检查详情。")
-                                                }
-                                            }.font(.caption)
+                        ScrollViewReader { proxy in
+                            LightScrollView {
+                                LazyVStack(alignment: .leading, spacing: 4) {
+                                    ForEach(model.recordings) { recording in
+                                        Button { model.select(recording.id) } label: {
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                Text(recording.title)
+                                                    .font(.system(size: 13, weight: .medium))
+                                                    .lineLimit(1).truncationMode(.tail)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                HStack(spacing: 6) {
+                                                    HStack(spacing: 3) {
+                                                        Text(recording.startedAt.formatted(date: .abbreviated, time: .omitted))
+                                                            .lineLimit(1).truncationMode(.tail)
+                                                        Text("· \(AudioTimeline.clock(recording.duration))").fixedSize()
+                                                    }.foregroundStyle(.secondary)
+                                                    Spacer(minLength: 0)
+                                                    if recording.status == .interrupted || recording.status == .failed {
+                                                        Label("需要检查", systemImage: "exclamationmark.circle")
+                                                            .foregroundStyle(.orange).fixedSize()
+                                                            .help(recording.note ?? "录音未正常完成，请检查详情。")
+                                                    }
+                                                }.font(.caption)
+                                            }
+                                            .padding(10)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .background(model.selectedID == recording.id && model.page == .meetings ? Color.gray.opacity(0.20) : .clear,
+                                                        in: RoundedRectangle(cornerRadius: 8))
+                                            .contentShape(Rectangle())
                                         }
-                                        .padding(10)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(model.selectedID == recording.id && model.page == .meetings ? Color.gray.opacity(0.20) : .clear,
-                                                    in: RoundedRectangle(cornerRadius: 8))
-                                        .contentShape(Rectangle())
+                                        .contextMenu {
+                                            Button("重命名", systemImage: "pencil") { model.beginRename(recording.id) }
+                                            Divider()
+                                            Button("删除记录…", systemImage: "trash", role: .destructive) { model.requestDeletion(recording.id) }
+                                        }
+                                        .disabled(!model.canManage(recording.id))
+                                        .buttonStyle(.plain).help(recording.title)
+                                        .accessibilityLabel(recording.title)
+                                        .accessibilityAddTraits(model.selectedID == recording.id && model.page == .meetings ? .isSelected : [])
+                                        .id(recording.id)
                                     }
-                                    .contextMenu {
-                                        Button("重命名", systemImage: "pencil") { model.beginRename(recording.id) }
-                                        Divider()
-                                        Button("删除记录…", systemImage: "trash", role: .destructive) { model.requestDeletion(recording.id) }
-                                    }
-                                    .disabled(!model.canManage(recording.id))
-                                    .buttonStyle(.plain).help(recording.title)
-                                    .accessibilityLabel(recording.title)
-                                    .accessibilityAddTraits(model.selectedID == recording.id && model.page == .meetings ? .isSelected : [])
                                 }
+                                // Constrain text to the actual sidebar width, including very long unbroken names.
+                                .frame(width: max(0, geometry.size.width - 16), alignment: .leading)
+                                .padding(.horizontal, 8)
                             }
-                            // Constrain text to the actual sidebar width, including very long unbroken names.
-                            .frame(width: max(0, geometry.size.width - 16), alignment: .leading)
-                            .padding(.horizontal, 8)
+                            .onChange(of: model.selectedID) { _, id in
+                                if let id { proxy.scrollTo(id, anchor: .center) }
+                            }
                         }
                     }
                 }.disabled(model.isBusy)
