@@ -6,3 +6,4 @@ dist/
 *.xcuserstate
 
 Helpers/summary/target/
+scripts/dmg/node_modules/

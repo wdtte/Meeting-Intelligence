@@ -1,0 +1,10 @@
+{
+  "name": "meeting-intelligence-dmg",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "dependencies": {
+    "appdmg": "0.6.6",
+    "create-dmg": "8.1.0"
+  }
+}
