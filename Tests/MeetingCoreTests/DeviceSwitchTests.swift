@@ -133,7 +133,15 @@ func deviceSwitchPlaybackMixesFormatsPreservesGapsAndSeeks(delayedEnqueue: Bool)
                 }
                 queuedLater = true
             }
-            let status = try engine.renderOffline(UInt32(min(1024, count - samples.count)), to: output)
+            // scheduleSegment reads disk asynchronously. When adding segments
+            // during playback, let its reader advance in real time instead of
+            // consuming the whole look-ahead window in one offline CPU burst.
+            // Keep every sample, gap, mixing, and seek assertion unchanged.
+            let frameCount = UInt32(min(1024, count - samples.count))
+            if delayedEnqueue {
+                Thread.sleep(forTimeInterval: Double(frameCount) / app.format.sampleRate)
+            }
+            let status = try engine.renderOffline(frameCount, to: output)
             guard status == .success else { throw MeetingError.message("Offline playback failed: \(status.rawValue)") }
             samples.append(contentsOf: UnsafeBufferPointer(start: output.floatChannelData![0], count: Int(output.frameLength)))
         }

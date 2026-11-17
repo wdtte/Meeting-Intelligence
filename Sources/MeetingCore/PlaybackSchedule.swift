@@ -13,7 +13,6 @@ public final class PlaybackTracks {
     }
     private let engine: AVAudioEngine
     private var tracks: [Track] = []
-    private var scheduledPlayers: Set<ObjectIdentifier> = []
     private var speed: PlaybackSpeed = .normal
 
     public init(engine: AVAudioEngine) {
@@ -51,32 +50,16 @@ public final class PlaybackTracks {
             throw MeetingError.message("录音文件在加载后发生变化，请重新选择这条记录。")
         }
         try PlaybackSchedule.enqueue([(chunk, file)], on: track.player, from: position)
-        scheduledPlayers.insert(ObjectIdentifier(track.player))
     }
 
     public func select(_ source: AudioSource?) {
         for track in tracks { track.player.volume = source == nil || source == track.source ? 1 : 0 }
     }
     public func play(at time: AVAudioTime? = nil) {
-        for track in tracks {
-            // An empty player may defer its timeline until the first disk segment
-            // arrives. Prime future-format lanes at zero so later enqueue calls
-            // use the same epoch as lanes that already have scheduled audio.
-            if !scheduledPlayers.contains(ObjectIdentifier(track.player)),
-               let silence = AVAudioPCMBuffer(pcmFormat: track.format, frameCapacity: 1) {
-                silence.frameLength = 1
-                for buffer in UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList) {
-                    if let data = buffer.mData { memset(data, 0, Int(buffer.mDataByteSize)) }
-                }
-                track.player.scheduleBuffer(silence, at: AVAudioTime(sampleTime: 0, atRate: track.format.sampleRate))
-                scheduledPlayers.insert(ObjectIdentifier(track.player))
-            }
-            track.player.play(at: time)
-        }
+        for track in tracks { track.player.play(at: time) }
     }
     public func stop() {
         for track in tracks { track.player.stop(); track.timePitch.reset() }
-        scheduledPlayers.removeAll()
     }
     public func clear() {
         stop()
