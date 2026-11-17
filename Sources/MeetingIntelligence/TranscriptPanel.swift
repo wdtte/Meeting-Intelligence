@@ -38,7 +38,7 @@ struct TranscriptPanel: View {
     // Observe the destination, not every playback tick. During silence keep the
     // preceding utterance in view; overlapping tracks use a stable latest start.
     private var playbackSegmentID: UUID? {
-        guard !live else { return nil }
+        guard isPlaybackRecord else { return nil }
         return (segments.last { $0.start <= model.playback.position } ?? segments.first)?.id
     }
     private func revealPlayback(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -50,6 +50,7 @@ struct TranscriptPanel: View {
         }
     }
     private var document: TranscriptDocument? { model.transcription.documents[recordingID] }
+    private var isPlaybackRecord: Bool { !live && model.playback.recordingID == recordingID }
     private var segments: [TranscriptSegment] { document?.segments ?? [] }
     private var recording: Recording? { model.recordings.first { $0.id == recordingID } }
     private var isRunning: Bool { model.transcription.running.contains(recordingID) }
@@ -127,7 +128,7 @@ struct TranscriptPanel: View {
                         Image(systemName: "text.bubble").font(.system(size: 28, weight: .light)).foregroundStyle(.tertiary)
                         Text(isRunning || live ? "正在等待识别到的发言" : document?.status == "completed" ? "未识别到语音" : "暂无转写内容")
                             .font(.callout.weight(.medium))
-                        Text(isRunning || live ? "音频保存后，文字会自动出现在这里。" : document?.status == "completed" ? "可以使用下方播放条回听录音。" : "在右上角的更多菜单中继续转写。")
+                        Text(isRunning || live ? "音频保存后，文字会自动出现在这里。" : document?.status == "completed" ? "点击上方“播放此记录”回听录音。" : "在右上角的更多菜单中继续转写。")
                             .font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(.vertical, 24)
                 } else {
@@ -136,8 +137,8 @@ struct TranscriptPanel: View {
                             if !live, document?.cloud != nil { transcriptDetails.padding(.horizontal, 12).padding(.bottom, 8) }
                             ForEach(segments) { segment in
                                 TranscriptRow(segment: segment, live: live,
-                                              active: !live && segment.contains(model.playback.position)) {
-                                    model.playSegment(segment)
+                                              active: isPlaybackRecord && segment.contains(model.playback.position)) {
+                                    model.playSegment(segment, recordingID: recordingID)
                                 }.id(segment.id)
                             }
                         }.padding(.horizontal, live ? 4 : 0)
@@ -257,6 +258,7 @@ struct TranscriptPanel: View {
                             .background(followPlayback ? Color.primary.opacity(0.07) : .clear,
                                         in: RoundedRectangle(cornerRadius: 6))
                     }.toggleStyle(.button).buttonStyle(.borderless).tint(.primary)
+                        .disabled(!isPlaybackRecord)
                         .help(followPlayback ? "跟随播放已开启，点击暂停自动滚动" : "开启跟随播放")
                         .accessibilityLabel("跟随播放")
                         .accessibilityValue(followPlayback ? "已开启" : "已关闭")
@@ -264,7 +266,7 @@ struct TranscriptPanel: View {
                         Image(systemName: "location").frame(width: 28, height: 28)
                     }.buttonStyle(.borderless).foregroundStyle(.secondary)
                         .help("定位正在回听的发言").accessibilityLabel("定位播放位置")
-                        .disabled(segments.isEmpty)
+                        .disabled(segments.isEmpty || !isPlaybackRecord)
                 }
                 Divider().frame(height: 18)
             }

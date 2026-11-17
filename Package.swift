@@ -15,6 +15,7 @@ let package = Package(
         .executableTarget(name: "MeetingIntelligence", dependencies: ["MeetingCore"]),
         .executableTarget(name: "MeetingCLI", dependencies: ["MeetingCore"]),
         .testTarget(name: "MeetingCoreTests", dependencies: ["MeetingCore", "RealtimeAudio"]),
-        .testTarget(name: "MeetingCLITests", dependencies: ["MeetingCLI", "MeetingCore"])
+        .testTarget(name: "MeetingCLITests", dependencies: ["MeetingCLI", "MeetingCore"]),
+        .testTarget(name: "MeetingIntelligenceTests", dependencies: ["MeetingIntelligence", "MeetingCore"])
     ]
 )

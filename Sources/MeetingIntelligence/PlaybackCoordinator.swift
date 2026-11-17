@@ -9,6 +9,8 @@ final class PlaybackCoordinator {
     private(set) var position: Double = 0
     private(set) var duration: Double = 0
     private(set) var speed: PlaybackSpeed = .normal
+    private(set) var recording: Recording?
+    var recordingID: UUID? { recording?.id }
     private(set) var waveformTracks: [AudioSource: [Float]] = [:]
     private(set) var waveformLoading = false
     var waveformError: String?
@@ -21,17 +23,17 @@ final class PlaybackCoordinator {
     }
     var errorMessage: String?
     var selectedSource: AudioSource? { didSet { updateVolumes() } }
-    @ObservationIgnored private let engine = AVAudioEngine()
+    @ObservationIgnored private let engine: AVAudioEngine
     @ObservationIgnored private let tracks: PlaybackTracks
     @ObservationIgnored private var chunks: [AudioChunk] = []
     @ObservationIgnored private var store: RecordingStore?
-    @ObservationIgnored private var recordingID: UUID?
     @ObservationIgnored private var scheduled: Set<UUID> = []
     @ObservationIgnored private var openFiles: [UUID: AVAudioFile] = [:]
     @ObservationIgnored private var anchorTime: TimeInterval = 0
     @ObservationIgnored private var anchorPosition: Double = 0
 
-    init() {
+    init(engine: AVAudioEngine = AVAudioEngine()) {
+        self.engine = engine
         tracks = PlaybackTracks(engine: engine)
     }
     private func updateVolumes() {
@@ -40,7 +42,7 @@ final class PlaybackCoordinator {
     func load(_ recording: Recording?, store: RecordingStore?) {
         waveformTask?.cancel(); waveformTracks = [:]; waveformLoading = false; waveformError = nil
         stop(); chunks = []; position = 0; duration = 0; errorMessage = nil
-        self.store = store; recordingID = recording?.id
+        self.store = store; self.recording = recording
         tracks.clear()
         guard let recording, let store else { return }
         waveformLoading = true
