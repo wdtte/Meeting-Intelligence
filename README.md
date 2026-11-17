@@ -10,10 +10,10 @@ Meeting Intelligence is a native macOS app for recording and transcribing meetin
 
 **Local first · Separate audio tracks · Transcript playback · Offline exports · Agent CLI**
 
-Recording and local transcription require no account or API key. Apple speech resources must be downloaded on first use; once ready, transcription can run offline. Cloud transcription and summaries are optional and use your own provider API keys.
+Recording and local transcription require no account or API key. The standard edition downloads Apple speech resources on first use; the compatibility edition bundles Whisper weights. Once resources are ready, both can transcribe offline. Cloud transcription and summaries are optional and use your own provider API keys.
 
 - **Record both sides of a meeting:** capture audio played by all apps on this Mac, with an optional microphone track saved separately.
-- **Read while recording:** Apple speech recognition updates the transcript in batches roughly every 10 seconds and processes the final segment after recording stops.
+- **Read while recording:** the standard edition uses Apple speech recognition and the compatibility edition uses Whisper. Audio is transcribed in roughly 10-second chunks, including the final segment after recording stops. Slower Macs may take longer to recognize each chunk.
 - **Listen from the transcript:** click text to seek to its timestamp, then play the mixed tracks, system audio only, or microphone only.
 - **Use cloud transcription and summaries:** run Qwen-Audio 3.1 transcription after a meeting and generate summaries through an OpenAI-compatible API.
 - **Share recordings with transcripts:** export a single HTML file containing text and audio, or export the transcript or M4A audio separately.
@@ -27,16 +27,16 @@ Meeting history has separate transcript and summary tabs, each with its own scro
 
 | Component | Requirement |
 | --- | --- |
-| Operating system | macOS 26 or later |
+| Operating system | Standard edition: macOS 26+; Whisper compatibility edition: macOS 15+ |
 | Swift | Swift 6.2+ and an SDK containing macOS 26 APIs, available through Xcode or the corresponding Command Line Tools |
 | Rust | Rust / Cargo to build the bundled summary backend; a current stable toolchain is recommended and can be installed with [rustup](https://rustup.rs/) |
-| Local speech resources | Apple Speech must support your Mac and selected language; the app prepares resources automatically, with an internet connection required for the initial download |
+| Local speech resources | Standard: Apple Speech resources, prepared automatically with an initial download. Compatibility: bundled multilingual Whisper model, usable offline immediately |
 
 The development environment has been verified with Swift 6.4.2 and Rust 1.100.0. The Rust package declares a minimum version of 1.85; compatibility of the locked dependencies with older toolchains needs separate verification.
 
 #### Download a release
 
-Download an architecture-specific DMG from [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases): choose `arm64` for Apple Silicon or `x86_64` for Intel. Open the DMG, drag `Meeting Intelligence.app` onto the Applications shortcut, then eject the disk image. A ZIP archive is also available. Releases require macOS 26 or later and include the Rust summary backend and `meeting` CLI. Each download has a matching `.sha256` checksum file.
+Download an architecture-specific DMG from [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases): choose `arm64` for Apple Silicon or `x86_64` for Intel. Open the DMG, drag `Meeting Intelligence.app` onto the Applications shortcut, then eject the disk image. A ZIP archive is also available. Standard packages require macOS 26+ and contain no Whisper model. Compatibility packages, when available, end in `-macos15-whisper` and support macOS 15+ with a bundled Whisper model. Both include the Rust summary backend and `meeting` CLI. Each download has a matching `.sha256` checksum file.
 
 Release builds use ad-hoc signing and are not notarized by Apple. macOS may ask you to explicitly approve opening the app in System Settings → Privacy & Security. Only approve builds from sources you trust.
 
@@ -51,9 +51,11 @@ cd Meeting-Intelligence
 open 'build/Meeting Intelligence.app'
 ```
 
-The script builds the Swift app and Rust summary backend into an `.app` for your Mac's architecture. Running the built app requires no separate Rust, Node.js, or Bun installation.
+The script builds the standard Swift app and Rust summary backend into an `.app` for your Mac's architecture. Running the built app requires no separate Rust, Node.js, or Bun installation.
 
 Launch the `.app` so macOS can associate recording permissions with the application. The script automatically uses an Apple Development or Distribution signing identity when exactly one is available; otherwise, it uses ad-hoc signing. Set `MEETING_CODESIGN_IDENTITY` to choose an identity explicitly. Build artifacts are not notarized by Apple.
+
+For a macOS 15 compatibility build, install CMake 3.21+ and run `MEETING_BUILD_EDITION=compatibility ./scripts/build-app.sh release`. The app is written to `build/compatibility/Meeting Intelligence.app`; only this edition downloads and bundles Whisper (about 60 MB of weights). See [macOS 15 compatibility](docs/MACOS-15.md) for packaging, verification, performance limits, and third-party notices.
 
 For release packaging, install Node.js 24, run `npm ci --prefix scripts/dmg`, then `./scripts/package-release.sh`. The DMG includes a Retina installation background and custom volume icon; see [DMG design](docs/DMG-DESIGN.md).
 
@@ -178,7 +180,7 @@ Recording and transcript directories can be changed independently in Settings. N
 
 | Feature | Data destination |
 | --- | --- |
-| Recording and Apple local transcription | Audio is saved and recognized on your Mac; preparing speech resources for the first time may require a download |
+| Recording and local transcription | Audio is saved and recognized on your Mac; standard builds may initially download Apple resources, while compatibility builds include Whisper weights |
 | Qwen cloud transcription | Audio segments are uploaded to the selected Model Studio region when enabled for a recording or started manually |
 | Meeting summaries | Transcript text is sent to the configured summary service, manually or automatically after cloud transcription when configured |
 | CLI | Reads local data; export commands create files at the specified paths |
@@ -217,7 +219,7 @@ Open the log directory through Settings → Diagnostic Logs (“设置 → 诊�
 
 ### Development and contributions
 
-The app uses SwiftUI, Core Audio, AVFoundation, and Apple Speech. A bundled Rust backend handles meeting summaries. All commands and repository paths in the documentation are relative to the repository root unless stated otherwise.
+The app uses SwiftUI, Core Audio, AVFoundation, and Apple Speech (standard) or Whisper (compatibility). A bundled Rust backend handles meeting summaries. All commands and repository paths in the documentation are relative to the repository root unless stated otherwise.
 
 ```text
 Sources/MeetingIntelligence/  macOS app interface
@@ -259,7 +261,7 @@ Keep `README.md` at the repository root and all other project Markdown documents
 
 ### Automated releases
 
-Every tag pushed to GitHub triggers `.github/workflows/release.yml`: run Swift and Rust tests, build separate Apple Silicon and Intel apps, then publish a GitHub Release with DMGs, ZIPs, SHA-256 checksums, and generated release notes. Use `vX.Y.Z` version tags; `vX.Y.Z-rc.1` tags are marked as prereleases. Main-branch pushes and pull requests run Swift/Rust tests on Intel through a separate CI workflow. Use the Release workflow’s manual trigger for full dual-architecture validation. Toolchain-specific Swift/Cargo caches reduce repeated compilation; job summaries report queue and phase durations. See [AGENTS.md](AGENTS.md) for the release procedure and signing limitations.
+Every tag pushed to GitHub triggers `.github/workflows/release.yml`: run Swift and Rust tests, build standard and Whisper compatibility editions for Apple Silicon and Intel, verify compatibility packages on macOS 15, then publish a GitHub Release with DMGs, ZIPs, SHA-256 checksums, and generated release notes. Use `vX.Y.Z` version tags; `vX.Y.Z-rc.1` tags are marked as prereleases. Main-branch pushes and pull requests run Swift/Rust tests for both editions on Intel through a separate CI workflow. Use the Release workflow’s manual trigger for full dual-architecture validation. Toolchain-specific Swift/Cargo caches reduce repeated compilation; job summaries report queue and phase durations. See [AGENTS.md](AGENTS.md) for the release procedure and signing limitations.
 
 ### License
 
@@ -271,12 +273,12 @@ This project is licensed under the [MIT License](LICENSE). Third-party dependenc
 
 **本地优先 · 双轨录音 · 字幕回听 · 离线导出 · Agent CLI**
 
-录音与本地转写无需账号或 API Key。首次使用需下载 Apple 语音资源，资源就绪后可在本机离线转写。云端转写和摘要为可选功能，使用你自己的服务商 API Key。
+录音与本地转写无需账号或 API Key。标准版首次使用需下载 Apple 语音资源；兼容版随包提供 Whisper 模型。资源就绪后均可在本机离线转写。云端转写和摘要为可选功能，使用你自己的服务商 API Key。
 
 ### 可以做什么
 
 - **录下会议双方的声音**：采集这台 Mac 上所有应用播放的系统声音，可同时录制麦克风，两路分轨保存。
-- **边录边看文字**：默认使用 Apple 本地语音识别，约每 10 秒更新一批字幕，停止录音后补齐最后一段。
+- **边录边看文字**：标准版使用 Apple 本地语音识别，兼容版使用 Whisper；音频约每 10 秒分段转写，停止录音后补齐最后一段。较慢的 Mac 可能需要更长识别时间。
 - **沿着字幕回听**：点击文字跳转到对应时间，可选择混听、仅系统音频或仅麦克风。
 - **按需使用云端转写和摘要**：支持 Qwen-Audio 3.1 会后转写，以及 OpenAI 兼容接口的会议摘要。
 - **分享可回听的记录**：导出包含文字与音频的单个 HTML 文件，也可单独导出字幕或 M4A 音频。
@@ -292,16 +294,16 @@ This project is licensed under the [MIT License](LICENSE). Third-party dependenc
 
 | 项目 | 要求 |
 | --- | --- |
-| 操作系统 | macOS 26 或更新版本 |
+| 操作系统 | 标准版：macOS 26+；Whisper 兼容版：macOS 15+ |
 | Swift | Swift 6.2+，以及包含 macOS 26 API 的 SDK；可通过 Xcode 或对应的 Command Line Tools 获取 |
 | Rust | Rust / Cargo，用于构建随应用打包的摘要后端；建议使用当前稳定版，可通过 [rustup](https://rustup.rs/) 安装 |
-| 本地语音资源 | 机型与所选语言需受 Apple Speech 支持；应用会自动准备所需资源，首次下载需要联网 |
+| 本地语音资源 | 标准版自动准备 Apple Speech 资源，首次需联网；兼容版随包提供 Whisper 多语言模型，可直接离线使用 |
 
 当前开发环境验证使用 Swift 6.4.2 和 Rust 1.100.0。Rust 包声明的最低版本为 1.85，锁定依赖在更旧工具链上的兼容性需自行验证。
 
 #### 下载发布版本
 
-在 [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases) 下载对应架构的 DMG：Apple Silicon 选择 `arm64`，Intel 选择 `x86_64`。打开 DMG，将 `Meeting Intelligence.app` 拖到“应用程序”快捷方式，然后推出磁盘映像。也提供 ZIP 压缩包。发布包要求 macOS 26 或更新版本，内含 Rust 摘要后端和 `meeting` CLI；每个下载文件都附带对应的 `.sha256` 校验文件。
+在 [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases) 下载对应架构的 DMG：Apple Silicon 选择 `arm64`，Intel 选择 `x86_64`。打开 DMG，将 `Meeting Intelligence.app` 拖到“应用程序”快捷方式，然后推出磁盘映像。也提供 ZIP 压缩包。标准版要求 macOS 26+，不含 Whisper 模型；带 `-macos15-whisper` 后缀的兼容版（发布后可选）支持 macOS 15+，随包提供 Whisper 模型。两版均内含 Rust 摘要后端和 `meeting` CLI；每个下载文件都附带对应的 `.sha256` 校验文件。
 
 发布包使用 ad-hoc 签名，未经 Apple 公证。macOS 可能要求你到“系统设置 → 隐私与安全性”中明确允许打开；请只允许运行来自可信来源的构建。
 
@@ -317,6 +319,8 @@ open 'build/Meeting Intelligence.app'
 ```
 
 构建脚本会编译 Swift 应用和 Rust 摘要后端，生成适配当前 Mac 架构的 `.app`。运行生成的应用无需再安装 Rust、Node.js 或 Bun。
+
+构建 macOS 15 兼容版时，额外安装 CMake 3.21+，运行 `MEETING_BUILD_EDITION=compatibility ./scripts/build-app.sh release`，产物位于 `build/compatibility/Meeting Intelligence.app`。仅兼容版下载并打包 Whisper 模型（约 60 MB）；标准版不含模型。打包、校验、性能限制和第三方许可说明见 [macOS 15 兼容版](docs/MACOS-15.md)。
 
 请通过 `.app` 启动，以便 macOS 正确识别录音权限。脚本会自动使用唯一可用的 Apple 开发或分发签名证书；没有唯一可用证书时使用 ad-hoc 签名。也可通过 `MEETING_CODESIGN_IDENTITY` 指定签名身份。构建产物未经过 Apple 公证。
 
@@ -443,7 +447,7 @@ meeting doctor
 
 | 使用方式 | 数据去向 |
 | --- | --- |
-| 录音与 Apple 本地转写 | 音频在本机保存并识别；首次准备语音资源可能联网下载 |
+| 录音与本地转写 | 音频在本机保存并识别；标准版首次准备 Apple 资源可能联网，兼容版随包提供 Whisper 模型 |
 | Qwen 云端转写 | 按场开启或手动触发后，将音频片段上传至所选百炼地域 |
 | 会议摘要 | 手动生成，或配置后随云端转写完成自动触发；将转写文字发送至配置的摘要服务 |
 | CLI | 在本机读取数据；导出命令按指定路径创建文件 |
@@ -482,7 +486,7 @@ ad-hoc 签名或签名身份变更可能使系统重新确认应用身份。使�
 
 ### 开发与贡献
 
-应用使用 SwiftUI、Core Audio、AVFoundation 与 Apple Speech；会议摘要由随应用打包的 Rust 后端处理。除非另有说明，文档中的命令均在仓库根目录执行，工程路径也以仓库根目录为基准。
+应用使用 SwiftUI、Core Audio、AVFoundation，以及 Apple Speech（标准版）或 Whisper（兼容版）；会议摘要由随应用打包的 Rust 后端处理。除非另有说明，文档中的命令均在仓库根目录执行，工程路径也以仓库根目录为基准。
 
 ```text
 Sources/MeetingIntelligence/  macOS 应用界面
@@ -509,7 +513,7 @@ cargo test --locked --manifest-path Helpers/summary/Cargo.toml
 
 ### 自动发布
 
-每次向 GitHub 推送 tag，都会触发 `.github/workflows/release.yml`：运行 Swift 和 Rust 测试，分别构建 Apple Silicon 与 Intel 应用，再创建 GitHub Release，上传 DMG、ZIP、SHA-256 校验文件及自动生成的更新日志。版本 tag 使用 `vX.Y.Z`；`vX.Y.Z-rc.1` 会标记为预发布。推送主分支或发起 Pull Request 时，独立 CI 仅在 Intel 上运行 Swift/Rust 测试；需要完整双架构验证时，可手动运行 Release 工作流。Swift/Cargo 缓存按实际工具链与架构隔离，任务摘要记录排队和各阶段耗时。发布步骤和签名限制见 [AGENTS.md](AGENTS.md)。
+每次向 GitHub 推送 tag，都会触发 `.github/workflows/release.yml`：运行 Swift 和 Rust 测试，分别构建 Apple Silicon 与 Intel 的标准版和 Whisper 兼容版，在 macOS 15 验证兼容版后，再创建 GitHub Release，上传 DMG、ZIP、SHA-256 校验文件及自动生成的更新日志。版本 tag 使用 `vX.Y.Z`；`vX.Y.Z-rc.1` 会标记为预发布。推送主分支或发起 Pull Request 时，独立 CI 在 Intel 上对两种构建模式运行 Swift/Rust 测试；需要完整双架构验证时，可手动运行 Release 工作流。Swift/Cargo 缓存按实际工具链与架构隔离，任务摘要记录排队和各阶段耗时。发布步骤和签名限制见 [AGENTS.md](AGENTS.md)。
 
 ### 开源协议
 

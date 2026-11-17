@@ -2,7 +2,7 @@ import Foundation
 
 public enum TranscriptionProviderID: String, Codable, Sendable, CaseIterable {
     case apple, qwen
-    public var label: String { self == .apple ? "Apple 本地转写" : "Qwen-Audio 3.1" }
+    public var label: String { self == .apple ? "本地转写" : "Qwen-Audio 3.1" }
     public static var cloudProviders: [Self] { [.qwen] }
 }
 
@@ -112,9 +112,9 @@ public protocol TranscriptionProvider: Sendable {
     func transcribe(_ request: TranscriptionRequest, checkpoint: @escaping TranscriptionCheckpointHandler) async throws -> ProviderTranscription
 }
 
-public struct AppleTranscriptionProvider: TranscriptionProvider {
+public struct LocalTranscriptionProvider: TranscriptionProvider {
     public let id = TranscriptionProviderID.apple
-    public let engine = "Apple SpeechTranscriber"
+    public let engine = LocalTranscriber.engine
     public init() {}
     public func prepare(locale: String) async throws -> String { try await LocalTranscriber.prepare(locale: locale, download: true) }
     public func transcribe(_ request: TranscriptionRequest, checkpoint: @escaping TranscriptionCheckpointHandler) async throws -> ProviderTranscription {

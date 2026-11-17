@@ -58,6 +58,24 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
     }
 }
 
+@Test func resumingWithWhisperPreservesHistoricalAppleProvenance() throws {
+    let old = AudioChunk(fileName: "old.wav", offset: 0, duration: 10, sampleRate: 16000, channels: 1, isComplete: true)
+    let next = AudioChunk(source: .microphone, fileName: "next.wav", offset: 10, duration: 2,
+                          sampleRate: 16000, channels: 1, isComplete: true)
+    let historical = TranscriptSegment(chunkID: old.id, source: .application, start: 1, end: 2, text: "Old text")
+    var document = TranscriptDocument(recordingID: UUID(), locale: "en-US")
+    try document.commit([historical], for: old)
+    var recognized = TranscriptSegment(chunkID: next.id, source: .microphone, start: 10.2, end: 11, text: "New text")
+    recognized.engine = "Whisper base (q5_1)"
+    try document.commit([recognized], for: next)
+    #expect(document.schemaVersion == 1)
+    #expect(document.segments.first == historical)
+    #expect(document.segments.first?.engine == nil)
+    #expect(document.engine == "Apple SpeechTranscriber + Whisper base (q5_1)")
+    let restored = try JSONDecoder().decode(TranscriptDocument.self, from: JSONEncoder().encode(document))
+    #expect(restored == document)
+}
+
 @Test func transcriptRolesFollowTracksAcrossChunksAndSimultaneousSpeech() throws {
     var document = TranscriptDocument(recordingID: UUID(), locale: "zh-CN")
     // Identical words during double-talk must not be deleted or merged by text.
@@ -142,7 +160,7 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
 
 /// Opt-in integration test. A synthetic speech fixture avoids accessing personal meetings.
 @Test(.enabled(if: ProcessInfo.processInfo.environment["MEETING_SPEECH_FIXTURE"] != nil))
-func appleSpeechRecognizesFixtureWithRealTimestamps() async throws {
+func localSpeechRecognizesFixtureWithRealTimestamps() async throws {
     let env = ProcessInfo.processInfo.environment
     let url = URL(fileURLWithPath: try #require(env["MEETING_SPEECH_FIXTURE"]))
     let file = try AVAudioFile(forReading: url)

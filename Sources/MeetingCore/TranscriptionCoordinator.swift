@@ -22,10 +22,10 @@ public final class TranscriptionCoordinator {
     @ObservationIgnored private let prepare: @Sendable (String) async throws -> String
     @ObservationIgnored private let recognize: Recognize
     public convenience init() {
-        let apple = AppleTranscriptionProvider()
-        self.init(prepare: { try await apple.prepare(locale: $0) },
+        let local = LocalTranscriptionProvider()
+        self.init(prepare: { try await local.prepare(locale: $0) },
                   recognize: { url, chunk, locale in
-                      try await apple.transcribe(TranscriptionRequest(audioURL: url, chunk: chunk, locale: locale), checkpoint: { _ in }).segments
+                      try await local.transcribe(TranscriptionRequest(audioURL: url, chunk: chunk, locale: locale), checkpoint: { _ in }).segments
                   })
     }
     init(prepare: @escaping @Sendable (String) async throws -> String, recognize: @escaping Recognize,
@@ -271,7 +271,6 @@ public final class TranscriptionCoordinator {
             latest.cloud?.jobs[jobKey]?.noSpeechRecognized = result.noSpeechRecognized
             latest.cloud?.jobs[jobKey]?.skippedSilence = prepared.isSilent
             latest.cloud?.jobs[jobKey]?.usage = result.usage
-            latest.engine = "Apple + \(provider.engine)"
             try latest.save(to: url); self.documents[recording.id] = latest
         } catch {
             DiagnosticLog.shared.failure("cloud.chunk.processing_failed", error: error, fields: diagnosticContext)
