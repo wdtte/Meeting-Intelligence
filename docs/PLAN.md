@@ -29,7 +29,7 @@
 - 已把侧栏波形标志制作为多尺寸 `.icns` 应用图标，纳入 `.app` 构建流程。
 - P2 双路音频、P3 Speech 与字幕定位、P4 全面加固、P5 云端校正未完成；界面明确显示当前边界，不显示模拟字幕或虚构会议。
 
-运行和验收步骤见 [README.md](README.md)。
+运行和验收步骤见 [README.md](../README.md)。
 
 ## 1. 产品目标与首版边界
 
@@ -37,7 +37,7 @@
 
 已确认使用 Apple 提供的 macOS 26+ 原生 UI，以 SwiftUI 为主、必要时使用 AppKit；Figma 导出的 React 文件仅作为设计参考，不采用 Electron 或 WebView 承载应用界面。Apple Silicon 优先、本地优先仍为计划建议。
 
-已确认沿用用户 UI 的主要布局与样式，删除“高清音质”标签，将“听见”统一改为“Meeting Intelligence”。具体原生组件映射见 design/UI-SPEC.md；参考源码保存在 design/figma-reference/src/。
+已确认沿用用户 UI 的主要布局与样式，删除“高清音质”标签，将“听见”统一改为“Meeting Intelligence”。具体原生组件映射见 [UI-SPEC.md](UI-SPEC.md)；参考源码保存在 design/figma-reference/src/。
 
 建议首版包含：
 
