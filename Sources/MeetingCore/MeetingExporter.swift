@@ -134,7 +134,7 @@ enum TranscriptHTMLWriter {
                             <input type="range" id="position" min="0" max="0" value="0" step="any" aria-label="录音播放进度" disabled>
                           </div>
                         </div>
-                        <select id="speed" aria-label="播放速度" title="播放速度"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+                        <select id="speed" aria-label="播放速度" title="播放速度"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select>
                       </div>
                       <p id="audio-error" class="player-error" role="status" hidden></p>
                     </div>

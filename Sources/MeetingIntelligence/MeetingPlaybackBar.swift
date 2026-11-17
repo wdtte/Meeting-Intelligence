@@ -70,6 +70,23 @@ struct MeetingPlaybackBar: View {
                 .frame(height: 44)
 
             Menu {
+                ForEach(PlaybackSpeed.allCases, id: \.self) { speed in
+                    Button { playback.setSpeed(speed) } label: {
+                        if playback.speed == speed {
+                            Label(speed.label, systemImage: "checkmark")
+                        } else { Text(speed.label) }
+                    }
+                }
+            } label: {
+                Text(playback.speed.label)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .frame(width: 44, height: 36).contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .help("播放速度：\(playback.speed.label)")
+            .accessibilityLabel("播放速度").accessibilityValue(playback.speed.label)
+
+            Menu {
                 sourceOption("混听", source: nil)
                 sourceOption("系统音频", source: .application)
                 sourceOption("麦克风", source: .microphone)

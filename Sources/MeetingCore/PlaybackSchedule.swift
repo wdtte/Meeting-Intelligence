@@ -9,11 +9,25 @@ public final class PlaybackTracks {
         let source: AudioSource
         let format: AVAudioFormat
         let player: AVAudioPlayerNode
+        let timePitch: AVAudioUnitTimePitch
     }
     private let engine: AVAudioEngine
     private var tracks: [Track] = []
+    private var speed: PlaybackSpeed = .normal
 
-    public init(engine: AVAudioEngine) { self.engine = engine }
+    public init(engine: AVAudioEngine) {
+        self.engine = engine
+    }
+
+    /// Each lane stretches by the same rate on the shared player timeline.
+    /// Keep its native channel layout so changing speed never changes mix levels.
+    public func setSpeed(_ speed: PlaybackSpeed) {
+        self.speed = speed
+        for track in tracks {
+            track.timePitch.rate = Float(speed.rawValue)
+            track.timePitch.bypass = speed == .normal
+        }
+    }
 
     public func prepare(_ recording: Recording, store: RecordingStore) throws {
         // Inspect headers one at a time; no meeting-length audio buffers or open-file list.
@@ -22,9 +36,12 @@ public final class PlaybackTracks {
             let format = file.processingFormat
             if tracks.contains(where: { $0.source == chunk.audioSource && $0.format == format }) { continue }
             let player = AVAudioPlayerNode()
-            engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: format)
-            tracks.append(Track(source: chunk.audioSource, format: format, player: player))
+            let timePitch = AVAudioUnitTimePitch()
+            timePitch.rate = Float(speed.rawValue); timePitch.bypass = speed == .normal
+            engine.attach(player); engine.attach(timePitch)
+            engine.connect(player, to: timePitch, format: format)
+            engine.connect(timePitch, to: engine.mainMixerNode, format: format)
+            tracks.append(Track(source: chunk.audioSource, format: format, player: player, timePitch: timePitch))
         }
     }
 
@@ -41,10 +58,15 @@ public final class PlaybackTracks {
     public func play(at time: AVAudioTime? = nil) {
         for track in tracks { track.player.play(at: time) }
     }
-    public func stop() { for track in tracks { track.player.stop() } }
+    public func stop() {
+        for track in tracks { track.player.stop(); track.timePitch.reset() }
+    }
     public func clear() {
         stop()
-        for track in tracks { engine.disconnectNodeOutput(track.player); engine.detach(track.player) }
+        for track in tracks {
+            engine.disconnectNodeOutput(track.player); engine.disconnectNodeOutput(track.timePitch)
+            engine.detach(track.player); engine.detach(track.timePitch)
+        }
         tracks = []
     }
 }

@@ -319,6 +319,17 @@ final class AppModel {
         playback.seek(to: segment.start)
         if !playback.isPlaying { playback.play() }
     }
+    func navigateTranscript(_ direction: TranscriptNavigation.Direction) -> Bool {
+        guard page == .meetings, !isBusy, renamingRecordingID == nil,
+              deletingRecordingID == nil, deletionCandidate == nil, errorMessage == nil,
+              let id = selectedID, playback.duration > 0,
+              let segments = transcription.documents[id]?.segments, !segments.isEmpty else { return false }
+        playback.tick()
+        if let target = TranscriptNavigation.destination(in: segments, from: playback.position, direction: direction) {
+            playback.seek(to: target)
+        }
+        return true
+    }
     @ObservationIgnored var store: RecordingStore?
     @ObservationIgnored private var settingsStore: StorageSettingsStore?
     @ObservationIgnored private var recordingStores: [UUID: RecordingStore] = [:]

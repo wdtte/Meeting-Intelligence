@@ -240,6 +240,7 @@ struct TranscriptPanel: View {
     private var transcriptHeading: some View {
         HStack(spacing: 10) {
             Text(live ? "录制中转写" : "转写记录").font(.headline)
+                .help(live ? "录制中更新本地字幕" : "使用 ← / → 键按字幕语句调整播放位置")
             if !segments.isEmpty {
                 Text("\(segments.count) 段发言").font(.caption).foregroundStyle(.tertiary)
             }

@@ -8,6 +8,7 @@ final class PlaybackCoordinator {
     private(set) var isPlaying = false
     private(set) var position: Double = 0
     private(set) var duration: Double = 0
+    private(set) var speed: PlaybackSpeed = .normal
     private(set) var waveformTracks: [AudioSource: [Float]] = [:]
     private(set) var waveformLoading = false
     var waveformError: String?
@@ -63,6 +64,14 @@ final class PlaybackCoordinator {
         }
     }
     func toggle() { if isPlaying { pause() } else { play() } }
+    func setSpeed(_ speed: PlaybackSpeed) {
+        guard self.speed != speed else { return }
+        let resume = isPlaying
+        if resume { pause() }
+        self.speed = speed
+        tracks.setSpeed(speed)
+        if resume { play() }
+    }
     func play() {
         guard !chunks.isEmpty, duration > 0 else { return }
         if position >= duration { position = 0 }
@@ -105,7 +114,7 @@ final class PlaybackCoordinator {
     }
     func tick() {
         guard isPlaying else { return }
-        position = AudioTimeline.position(anchorPosition + max(0, ProcessInfo.processInfo.systemUptime - anchorTime), duration: duration)
+        position = AudioTimeline.position(anchorPosition + max(0, ProcessInfo.processInfo.systemUptime - anchorTime) * speed.rawValue, duration: duration)
         if position >= duration { resetSchedule(); isPlaying = false; return }
         do { try scheduleAhead() }
         catch {
