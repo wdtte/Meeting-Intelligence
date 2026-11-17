@@ -38,11 +38,14 @@ struct MeetingIntelligenceApp: App {
     func applicationDidFinishLaunching(_ notification: Notification) {
         playbackKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let handled = MainActor.assumeIsolated {
-                guard event.keyCode == 49 || event.keyCode == 123 || event.keyCode == 124,
+                guard [49, 123, 124, 125, 126].contains(event.keyCode),
                       event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
                       NSApp.isActive, let window = event.window, window === NSApp.mainWindow,
                       NSApp.modalWindow == nil, window.attachedSheet == nil,
                       !(window.firstResponder is NSTextView), !(window.firstResponder is NSTextField) else { return false }
+                if event.keyCode == 125 || event.keyCode == 126 {
+                    return self?.model?.navigateRecording(event.keyCode == 126 ? .previous : .next) == true
+                }
                 if event.keyCode == 49 {
                     if event.isARepeat { return self?.model?.playbackRecording != nil }
                     return self?.model?.togglePlayback() == true

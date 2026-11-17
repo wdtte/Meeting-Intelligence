@@ -434,6 +434,15 @@ final class AppModel {
         selectedID = id
         if id == nil { useCloudTranscription = false }
     }
+    enum RecordDirection { case previous, next }
+    func navigateRecording(_ direction: RecordDirection) -> Bool {
+        guard page == .meetings, !isBusy, renamingRecordingID == nil,
+              deletingRecordingID == nil, deletionCandidate == nil, errorMessage == nil,
+              let selectedID, let index = recordings.firstIndex(where: { $0.id == selectedID }) else { return false }
+        let destination = direction == .previous ? index - 1 : index + 1
+        if recordings.indices.contains(destination) { select(recordings[destination].id) }
+        return true
+    }
     func start() async {
         guard state == .idle, deletingRecordingID == nil else { return }
         guard let store, libraryError == nil else { return }
