@@ -279,7 +279,7 @@ final class AppModel {
         do { try transcription.resetUnfinishedCloudJobs(recording, store: source) }
         catch { errorMessage = error.localizedDescription }
     }
-    var modelStatus = "正在检查系统语音资源…"
+    var modelStatus = "正在检查本地转写资源…"
     var modelPreparing = false
     var microphonePeak: Float = 0
     var microphoneLastAudioAt: TimeInterval?
@@ -296,11 +296,12 @@ final class AppModel {
     }
     func prepareSpeechModel() async {
         guard !modelPreparing else { return }
-        modelPreparing = true; modelStatus = "正在自动准备系统语音资源…首次下载可能需要几分钟"
+        modelPreparing = true
+        modelStatus = LocalTranscriber.usesWhisper ? "正在检查随包提供的 Whisper 模型…" : "正在自动准备系统语音资源…首次下载可能需要几分钟"
         let locale = transcriptionLocale
         do {
             _ = try await LocalTranscriber.prepare(locale: locale, download: true)
-            modelStatus = "系统语音资源已就绪"
+            modelStatus = LocalTranscriber.usesWhisper ? "Whisper 模型已就绪，可离线转写" : "系统语音资源已就绪"
             transcriptionNotice = nil
         } catch { modelStatus = error.localizedDescription }
         modelPreparing = false

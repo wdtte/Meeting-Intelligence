@@ -30,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix="meeting-dmg-check-") as scratch:
         arch = run("lipo", "-archs", str(app / "Contents/MacOS/MeetingIntelligence"))
         require(arch == expected_arch, "Unexpected app architecture")
         run("codesign", "--verify", "--deep", "--strict", str(app))
+        run("python3", str(root / "scripts/verify-app.py"), str(app))
         for name in ("MeetingIntelligence", "meeting", "meeting-summary"):
             require((app / "Contents/MacOS" / name).is_file(), f"Missing executable: {name}")
         for name in ("AppIcon.icns", "AppIcon.png", "TranscriptExport.html"):

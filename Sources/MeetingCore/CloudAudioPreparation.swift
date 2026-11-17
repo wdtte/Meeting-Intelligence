@@ -19,7 +19,7 @@ public enum CloudAudioPreparation {
         let format = file.processingFormat
         guard file.length > 0, format.sampleRate.isFinite, format.sampleRate > 0,
               format.commonFormat == .pcmFormatFloat32, format.channelCount > 0 else {
-            throw MeetingError.message("云端上传音频格式无效或为空。")
+            throw MeetingError.message("音频格式无效或为空。")
         }
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096)!
         var energies = [Double](repeating: 0, count: Int(format.channelCount))
@@ -47,7 +47,7 @@ public enum CloudAudioPreparation {
         let dominant = energies.indices.max(by: { energies[$0] < energies[$1] }) ?? 0
         let target = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
         let monoFormat = AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1)!
-        guard let converter = AVAudioConverter(from: monoFormat, to: target) else { throw MeetingError.message("无法转换云端音频采样率。") }
+        guard let converter = AVAudioConverter(from: monoFormat, to: target) else { throw MeetingError.message("无法转换音频采样率。") }
         let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameCapacity)!
         // Mix distinct stereo content. Only fall back to the strongest channel when
         // phase cancellation would erase >99% of its energy.
@@ -61,6 +61,7 @@ public enum CloudAudioPreparation {
             AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false
         ], commonFormat: .pcmFormatFloat32, interleaved: false)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
         let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 4096)!
         var readError: Error?
         while true {
@@ -93,7 +94,7 @@ public enum CloudAudioPreparation {
             if let error { throw error }
             if converted.frameLength > 0 { try output.write(from: converted) }
             if status == .endOfStream { break }
-            guard status != .error else { throw MeetingError.message("云端音频转换失败。") }
+            guard status != .error else { throw MeetingError.message("音频转换失败。") }
         }
         success = true
         return PreparedCloudAudio(url: destination)
