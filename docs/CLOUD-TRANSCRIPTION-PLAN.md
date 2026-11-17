@@ -1,6 +1,6 @@
 # Meeting Intelligence 云端转写调研与接入方案
 
-调研日期：2026-11-15（Asia/Shanghai）。本文保留初次调研方案。后续已按确认实现 Apple / Qwen provider、Qwen-Audio 3.1 异步精校、时间戳回听与整段静音过滤；实际配置和限制见 [README.md](README.md)。
+调研日期：2026-11-15（Asia/Shanghai）。本文保留初次调研方案。后续已按确认实现 Apple / Qwen provider、Qwen-Audio 3.1 异步精校、时间戳回听与整段静音过滤；实际配置和限制见 [README.md](../README.md)。
 
 默认场景：中国大陆网络，中文为主、夹杂英文和技术名词，macOS 原生个人桌面应用，先采用用户自备 API Key（BYOK）。价格来自调研当日公开官方文档；没有登录计费控制台、调用收费 API 或上传真实会议音频。识别质量、延迟、账号可用模型及最终账单仍需样本实测。
 
