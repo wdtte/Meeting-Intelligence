@@ -1,12 +1,23 @@
 name: Set up build toolchain and cache
 description: Select pinned Rust and restore architecture- and toolchain-specific caches.
+inputs:
+  cache-profile:
+    description: Separate test-only caches from caches containing release build outputs.
+    required: false
+    default: test
 runs:
   using: composite
   steps:
     - name: Select Rust and fingerprint toolchains
       id: toolchain
       shell: bash
+      env:
+        CACHE_PROFILE: ${{ inputs.cache-profile }}
       run: |
+        case "$CACHE_PROFILE" in
+          test|release) ;;
+          *) echo 'cache-profile must be test or release' >&2; exit 2 ;;
+        esac
         if ! rustup run 1.99.1 rustc --version > /dev/null 2>&1; then
           rustup toolchain install 1.99.1 --profile minimal
         fi
@@ -31,7 +42,11 @@ runs:
           ~/.cargo/registry/index
           ~/.cargo/registry/cache
           ~/.cargo/git/db
-        key: build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-${{ github.sha }}
+        # Cache entries are immutable. Test CI must not claim a Release cache key
+        # before the optimized binaries have been built and saved.
+        key: build-v2-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-${{ github.sha }}
         restore-keys: |
+          build-v2-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-
+          build-v2-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-
           build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-
           build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-
