@@ -34,7 +34,19 @@ struct MeetingIntelligenceApp: App {
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var model: AppModel?
+    private var playbackKeyMonitor: Any?
     func applicationDidFinishLaunching(_ notification: Notification) {
+        playbackKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let handled = MainActor.assumeIsolated {
+                guard event.keyCode == 123 || event.keyCode == 124,
+                      event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                      NSApp.isActive, let window = event.window, window === NSApp.mainWindow,
+                      NSApp.modalWindow == nil, window.attachedSheet == nil,
+                      !(window.firstResponder is NSTextView), !(window.firstResponder is NSTextField) else { return false }
+                return self?.model?.navigateTranscript(event.keyCode == 123 ? .previous : .next) == true
+            }
+            return handled ? nil : event
+        }
         let info = Bundle.main.infoDictionary ?? [:]
         DiagnosticLog.shared.record("app.launch", fields: [
             "version": info["CFBundleShortVersionString"] as? String ?? "unknown",
@@ -53,6 +65,7 @@ struct MeetingIntelligenceApp: App {
         NSApp.activate(ignoringOtherApps: true)
     }
     func applicationWillTerminate(_ notification: Notification) {
+        if let playbackKeyMonitor { NSEvent.removeMonitor(playbackKeyMonitor) }
         DiagnosticLog.shared.record("app.terminate")
         DiagnosticLog.shared.flush()
     }
