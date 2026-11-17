@@ -51,6 +51,25 @@ private actor RPCProgressFlag {
     var seen = false
     func mark() { seen = true }
 }
+private actor RPCDrafts {
+    var values: [String] = []
+    func append(_ value: String) { values.append(value) }
+}
+@Test func rpcStreamsDraftsInOrderAndAwaitsCallbacksBeforeResult() async throws {
+    let fixture = try rpcFixture(handshake + """
+
+    printf '{"jsonrpc":"2.0","method":"summary/progress","params":{"requestID":"target","stage":"summarizing","completed":0,"total":1,"draft":"first"}}\\n'
+    printf '{"jsonrpc":"2.0","method":"summary/progress","params":{"requestID":"target","stage":"summarizing","completed":0,"total":1,"draft":"first second"}}\\n'
+    printf '{"jsonrpc":"2.0","id":"target","result":{"text":"done"}}\\n'
+    """)
+    defer { try? FileManager.default.removeItem(at: fixture.deletingLastPathComponent()) }
+    let drafts = RPCDrafts()
+    _ = try await SummaryRPCClient(executable: fixture).generate(id: "target", params: [:]) { update in
+        if update.draft == "first" { try? await Task.sleep(for: .milliseconds(40)) }
+        if let draft = update.draft { await drafts.append(draft) }
+    }
+    #expect(await drafts.values == ["first", "first second"])
+}
 @Test func rpcClientSendsCancellationAndDiscardsLateSuccess() async throws {
     let fixture = try rpcFixture(handshake + """
 

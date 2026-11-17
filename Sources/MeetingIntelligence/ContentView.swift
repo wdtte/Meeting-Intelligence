@@ -225,7 +225,7 @@ struct ContentView: View {
                               systemImage: playingThisRecord ? "pause.fill" : "play.fill")
                     }.buttonStyle(.bordered).controlSize(.regular)
                         .disabled(recording.duration <= 0 || model.deletingRecordingID != nil)
-                        .help("播放此记录；空格控制当前播放条的播放／暂停")
+                        .help("播放此记录；空格播放／暂停当前页面的记录")
                     if model.playback.recordingID == recording.id {
                         Text(model.playback.isPlaying ? "正在播放" : "已暂停")
                             .font(.caption).foregroundStyle(.secondary)

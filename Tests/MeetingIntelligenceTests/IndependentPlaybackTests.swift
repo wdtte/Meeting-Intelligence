@@ -156,3 +156,26 @@ import Testing
     #expect(!model.togglePlayback())
     #expect(!model.navigateTranscript(.next))
 }
+
+@Test @MainActor func spacePlaysSelectedRecordAndPausesItWithoutBrowsingSwitchingPlayback() throws {
+    let fixture = try PlaybackFixture()
+    defer { fixture.clean() }
+    let model = fixture.model, first = fixture.records[0], second = fixture.records[1]
+    model.select(first.id)
+    #expect(model.togglePagePlayback())
+    #expect(model.playback.recordingID == first.id && model.playback.isPlaying)
+    model.select(second.id)
+    #expect(model.playback.recordingID == first.id && model.playback.isPlaying)
+    #expect(model.togglePagePlayback())
+    #expect(model.playback.recordingID == second.id && model.playback.isPlaying)
+    #expect(model.togglePagePlayback())
+    #expect(model.playback.recordingID == second.id && !model.playback.isPlaying)
+    model.beginRename(second.id)
+    #expect(!model.togglePagePlayback())
+    model.renamingRecordingID = nil
+    model.showSettings()
+    #expect(!model.togglePagePlayback())
+    model.select(nil)
+    #expect(!model.togglePagePlayback())
+    #expect(model.playback.recordingID == second.id && !model.playback.isPlaying)
+}

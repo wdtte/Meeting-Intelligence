@@ -218,7 +218,12 @@ struct TranscriptPanel: View {
                         .disabled(model.isBusy || model.exportingRecordingID == recordingID || recording.map { !model.transcription.canSummarize($0) } != false)
                 }
             }
-            if let summary = document?.currentSummary, let text = summary.text {
+            if isSummaryRunning, let update = model.transcription.summaryProgress[recordingID],
+               let draft = update.draft, !draft.isEmpty {
+                Text(update.total > 1 ? "分段摘要预览 · 完成后自动汇总" : "摘要生成中…")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(verbatim: draft).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            } else if let summary = document?.currentSummary, let text = summary.text {
                 Text(verbatim: text).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 if let name = summary.model { Text(name).font(.caption).foregroundStyle(.tertiary) }
                 if let usage = summary.usage {

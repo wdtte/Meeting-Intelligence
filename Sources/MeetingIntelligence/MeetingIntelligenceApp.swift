@@ -47,8 +47,8 @@ struct MeetingIntelligenceApp: App {
                     return self?.model?.navigateRecording(event.keyCode == 126 ? .previous : .next) == true
                 }
                 if event.keyCode == 49 {
-                    if event.isARepeat { return self?.model?.playbackRecording != nil }
-                    return self?.model?.togglePlayback() == true
+                    if event.isARepeat { return self?.model?.showsPlaybackBar == true }
+                    return self?.model?.togglePagePlayback() == true
                 }
                 return self?.model?.navigateTranscript(event.keyCode == 123 ? .previous : .next) == true
             }

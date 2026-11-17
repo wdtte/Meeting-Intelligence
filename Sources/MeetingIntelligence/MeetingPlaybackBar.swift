@@ -41,7 +41,7 @@ struct MeetingPlaybackBar: View {
                     Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 23, weight: .semibold)).frame(width: 36, height: 36)
                 }
-                .help(playback.isPlaying ? "暂停（空格）" : "播放（空格）")
+                .help(playback.isPlaying ? "暂停当前回放；空格控制当前页面记录" : "播放当前回放；空格控制当前页面记录")
                 .accessibilityLabel(playback.isPlaying ? "暂停录音回放" : "播放录音")
                 Button { playback.seek(to: playback.position + 15) } label: {
                     Image(systemName: "goforward.15")

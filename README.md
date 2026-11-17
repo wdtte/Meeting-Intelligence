@@ -89,9 +89,11 @@ The app uses the model name you enter. Remote services require HTTPS; services r
 
 - **Meetings with local transcription only:** click Generate Summary (“生成摘要”) manually after transcription finishes.
 - **Meetings with cloud transcription:** once a summary service is configured, summaries are generated automatically after cloud transcription completes.
-- **Long meetings:** transcript sections are summarized and merged, with progress shown in the app. Summary failures can be retried without transcribing again.
+- **Streaming summaries:** text appears as it arrives. Long meetings show the current section's draft while summarizing and merging; only a successful final summary is saved. Cancellation or failure preserves the last successful summary. Services ignoring streaming can still return a complete response.
 
 Summaries are saved with meetings and included in HTML, JSON, and Markdown transcript exports. Removing the summary API key disables future automatic summaries. Cancellation or timeouts do not guarantee that server processing or billing stops. Check generated conclusions, owners, and dates against the original transcript.
+
+HTML audio exports support ← / → to seek by subtitle sentence and Space to play/pause, with keycap hints at the top. Playback speeds are 0.5×, 0.75×, 1×, 1.5×, 2×, and 3×. HTML files embed the app icon and reveal saved summaries with a short typing effect on opening; this works offline and makes no model request. Choose “显示完整摘要” to skip, or enable reduced motion to show it immediately.
 
 The API token usage chart in Settings groups provider-reported usage by date, model, and key ID. It covers only retained results and is not a complete billing record; missing usage does not mean a request was free.
 
@@ -264,7 +266,7 @@ Keep `README.md` at the repository root and all other project Markdown documents
 
 历史详情可在“字幕”和“会议摘要”两个 tab 间切换，正文各自滚动，底部播放条保持可见。历史会议支持重命名、删除和继续转写；菜单栏提供录音控制，录音及字幕保存目录可自行设置。
 
-播放条固定在记录详情页底部，未播放时显示空状态；进入详情时从底部升起，切换到新录制或设置页时向下滑出。切换记录只浏览内容，不改变当前回放。点击详情页“播放此记录”或某条字幕后，播放条才切换到该记录；空格播放／暂停，上下方向键按侧栏顺序切换浏览记录（不自动播放），左右方向键按当前回放记录的字幕语句跳转。输入文字时快捷键不生效。播放条支持 0.5x、0.75x、1x、1.5x、2x、3x 六档倍速，点击播放条标题可返回对应记录。
+播放条固定在记录详情页底部，未播放时显示空状态；进入详情时从底部升起，切换到新录制或设置页时向下滑出。切换记录只浏览内容，不改变当前回放。点击详情页“播放此记录”、按空格或点击某条字幕后，播放条才切换到该记录；空格播放当前页面的记录／暂停当前记录，上下方向键按侧栏顺序切换浏览记录（不自动播放），左右方向键按当前回放记录的字幕语句跳转。输入文字时快捷键不生效。播放条支持 0.5x、0.75x、1x、1.5x、2x、3x 六档倍速，点击播放条标题可返回对应记录。
 
 ### 快速开始
 
@@ -334,9 +336,11 @@ open 'build/Meeting Intelligence.app'
 
 - **仅本地转写的会议**：转写完成后，手动点击“生成摘要”。
 - **启用云端转写的会议**：配置摘要服务后，云端转写完成会自动生成摘要。
-- **长会议**：分段总结后合并，界面显示处理进度；失败后可单独重试摘要，无需重新转写。
+- **流式摘要**：文字随服务响应逐步显示。长会议分段总结后合并，界面显示当前分段预览和进度；仅成功的最终摘要会保存。取消或失败保留上次成功摘要；服务忽略流式参数时仍可返回完整结果。
 
 摘要随会议保存，并包含在 HTML、JSON 和 Markdown 转写导出中。移除摘要 API Key 可停用后续自动摘要。取消或超时不保证服务端停止处理或计费。模型生成的结论、负责人和日期请结合原文核对。
+
+含音频的 HTML 导出支持 ← / → 按字幕语句跳转、空格播放/暂停，顶部用键帽提示快捷键；倍速为 0.5×、0.75×、1×、1.5×、2×、3×。导出页内嵌 App 图标，打开时以短暂逐字效果展示已保存的摘要，全程离线，不调用模型。点击“显示完整摘要”可跳过；开启减少动态效果时直接显示全文。
 
 设置中的 API Token 用量图表按日期、模型和 Key ID 汇总服务返回的用量，仅统计当前保留的结果，并非完整账单；缺失用量不表示免费。
 

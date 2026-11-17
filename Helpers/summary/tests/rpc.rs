@@ -15,6 +15,7 @@ impl SummaryProvider for FixtureProvider {
             stage: "summarizing",
             completed: 0,
             total: 1,
+            draft: Some("streaming draft".into()),
         });
         if input.text == "slow" {
             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -116,6 +117,11 @@ async fn concurrent_results_are_matched_by_id_and_progress_carries_request_id() 
     assert_eq!(results[1]["id"], "slow-id");
     assert_eq!(results[1]["result"]["text"], "slow");
     assert_eq!(notifications.len(), 2);
+    assert!(
+        notifications
+            .iter()
+            .all(|n| n["params"]["draft"] == "streaming draft")
+    );
     assert!(
         notifications
             .iter()

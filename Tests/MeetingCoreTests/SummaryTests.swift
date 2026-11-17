@@ -13,6 +13,10 @@ private actor SummaryFixtureProvider: SummaryProvider {
     init(failures: Int = 0, delayed: Bool = false) { self.failures = failures; self.delayed = delayed }
     func holdResult() { gated = true }
     func releaseResult() { gated = false; gate?.resume(); gate = nil }
+    func summarize(_ request: SummaryRequest, progress: @escaping SummaryProgressHandler) async throws -> ProviderSummary {
+        await progress(SummaryProgress(stage: "summarizing", completed: 0, total: 1, draft: "正在流式到达的摘要"))
+        return try await summarize(request)
+    }
     func summarize(_ request: SummaryRequest) async throws -> ProviderSummary {
         requests.append(request)
         if gated { await withCheckedContinuation { gate = $0 } }
@@ -281,4 +285,30 @@ func summaryOnlyStartsAutomaticallyAfterCloudPipelineCompletes(cloudFails: Bool)
     coordinator.load(fixture.recording)
     #expect(coordinator.documents[fixture.recording.id]?.segments[0].text == "外部编辑后的新决定")
     #expect(coordinator.documents[fixture.recording.id]?.currentSummary == nil)
+}
+
+@Test(arguments: [false, true]) @MainActor
+func streamingDraftIsVisibleBeforeCompletionAndNeverReplacesSavedSummaryOnCancellation(cancel: Bool) async throws {
+    var fixture = try SummaryFixture(); defer { fixture.clean() }
+    fixture.document.summary = TranscriptSummary(inputFingerprint: fixture.document.summaryRequest.fingerprint)
+    fixture.document.summary?.status = "completed"
+    fixture.document.summary?.text = "上次成功摘要"
+    fixture.document.summary?.generatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    try fixture.document.save(to: fixture.url)
+    let provider = SummaryFixtureProvider(), coordinator = summaryCoordinator(provider)
+    await provider.holdResult()
+    coordinator.load(fixture.recording)
+    coordinator.generateSummary(fixture.recording)
+    while await provider.requests.isEmpty { await Task.yield() }
+    #expect(coordinator.summaryProgress[fixture.recording.id]?.draft == "正在流式到达的摘要")
+    #expect(coordinator.documents[fixture.recording.id]?.currentSummary?.text == "上次成功摘要")
+    #expect(try TranscriptDocument.load(from: fixture.url, recordingID: fixture.recording.id).currentSummary?.text == "上次成功摘要")
+    if cancel { coordinator.cancelSummary(fixture.recording.id) }
+    await provider.releaseResult()
+    await coordinator.wait(for: fixture.recording.id)
+    #expect(coordinator.summaryProgress[fixture.recording.id] == nil)
+    #expect(!coordinator.summaryRunning.contains(fixture.recording.id))
+    let saved = try TranscriptDocument.load(from: fixture.url, recordingID: fixture.recording.id)
+    #expect(saved.currentSummary?.text == (cancel ? "上次成功摘要" : "结论：已确认。\n待办：周五发布。"))
+    #expect(saved.summary?.status == (cancel ? "interrupted" : "completed"))
 }
