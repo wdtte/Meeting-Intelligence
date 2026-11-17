@@ -136,7 +136,7 @@ where
                     let progress_id = task_id.clone();
                     let progress: ProgressHandler = Arc::new(move |progress| {
                         let _ = progress_tx.send(json!({"jsonrpc":"2.0","method":"summary/progress", "params":{
-                            "requestID":progress_id,"stage":progress.stage,"completed":progress.completed,"total":progress.total}}));
+                            "requestID":progress_id,"stage":progress.stage,"completed":progress.completed,"total":progress.total,"draft":progress.draft}}));
                     });
                     let result = task_provider.summarize(params, progress).await;
                     // Hold the lock across publication so cancellation cannot also publish a terminal response.

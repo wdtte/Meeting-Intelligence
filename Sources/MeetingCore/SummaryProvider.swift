@@ -74,6 +74,8 @@ public struct SummaryProgress: Codable, Sendable, Equatable {
     public var stage: String
     public var completed: Int
     public var total: Int
+    /// Current part's cumulative text, kept in memory until a final result succeeds.
+    public var draft: String? = nil
 }
 public typealias SummaryProgressHandler = @Sendable (SummaryProgress) async -> Void
 

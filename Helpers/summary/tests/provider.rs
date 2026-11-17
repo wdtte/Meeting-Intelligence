@@ -91,12 +91,20 @@ impl Server {
                     };
                     calls.lock().unwrap().push(request.clone());
                     let (status, body, extra) = handler(&request);
+                    let content_type = if extra
+                        .iter()
+                        .any(|(key, _)| key.eq_ignore_ascii_case("content-type"))
+                    {
+                        ""
+                    } else {
+                        "Content-Type: application/json\r\n"
+                    };
                     let extra: String = extra
                         .into_iter()
                         .map(|(key, value)| format!("{key}: {value}\r\n"))
                         .collect();
                     let response = format!(
-                        "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}",
+                        "HTTP/1.1 {status} Test\r\n{content_type}Content-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}",
                         body.len()
                     );
                     let _ = stream.write_all(response.as_bytes());
@@ -155,6 +163,7 @@ async fn configured_deepseek_model_bypasses_discovery_for_every_chunk_and_merge(
     let server = Server::new(|r| {
         assert!(r.path.ends_with("/chat/completions"));
         assert_eq!(r.body["model"], "deepseek-chat");
+        assert_eq!(r.body["stream"], true);
         completion("配置模型生成的摘要")
     });
     let mut request = input(&server.base);
@@ -387,4 +396,40 @@ fn validation_rejects_unsafe_endpoints_and_invalid_input() {
     let mut request = input("https://example.test/v1");
     request.api_key = "bad\nkey".into();
     assert!(validate(&request).is_err());
+}
+
+#[tokio::test]
+async fn sse_eof_needs_finish_and_never_resubmits_or_saves_partial_output() {
+    for (tail, succeeds) in [
+        ("", false),
+        ("data: [DONE]\n\n", false),
+        (
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            true,
+        ),
+        (
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: incomplete",
+            false,
+        ),
+    ] {
+        let server = Server::new(move |_| {
+            (
+                200,
+                format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"摘要\"}}}}]}}\n\n{tail}"),
+                vec![("Content-Type", "text/event-stream".into())],
+            )
+        });
+        let mut request = input(&server.base);
+        request.model = Some("fixture".into());
+        let result = OpenAICompatibleProvider::new()
+            .unwrap()
+            .summarize(request, progress())
+            .await;
+        assert_eq!(result.is_ok(), succeeds);
+        if let Ok(result) = result {
+            assert_eq!(result.text, "摘要");
+            assert!(result.usage.is_none());
+        }
+        assert_eq!(server.calls.lock().unwrap().len(), 1);
+    }
 }

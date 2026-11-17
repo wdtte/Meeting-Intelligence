@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class API(BaseHTTPRequestHandler):
     calls = []
+    partial_seen = threading.Event()
+    streaming_enabled = threading.Event()
     def log_message(self, *_): pass
     def reply(self, value, status=200):
         data = json.dumps(value, ensure_ascii=False).encode()
@@ -31,8 +33,22 @@ class API(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         assert body['model'] == 'deepseek-chat'
         self.calls.append(body)
-        self.reply({'model': 'fixture-chat', 'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': '结论：周五发布。'}}],
-                    'usage': {'prompt_tokens': 21, 'completion_tokens': 8}})
+        assert body['stream'] is True and body['stream_options']['include_usage'] is True
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+        self.end_headers()
+        def event(value):
+            data = ('data: ' + json.dumps(value, ensure_ascii=False) + '\r\n\r\n').encode()
+            for byte in data:
+                self.wfile.write(bytes([byte]))
+            self.wfile.flush()
+        event({'model': 'fixture-chat', 'choices': [{'index': 0, 'delta': {'content': '结论：'}}]})
+        if self.streaming_enabled.is_set():
+            assert self.partial_seen.wait(timeout=5), 'draft was not delivered until response completed'
+        event({'choices': [{'index': 0, 'delta': {'content': '周五发布。'}, 'finish_reason': 'stop'}]})
+        event({'choices': [], 'usage': {'prompt_tokens': 21, 'completion_tokens': 8}})
+        self.wfile.write(b'data: [DONE]\r\n\r\n')
+        self.wfile.flush()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -59,6 +75,7 @@ def main():
         assert handshake['id'] == 'handshake' and handshake['result']['protocolVersion'] == 1
         params = {'baseURL': base, 'model': 'deepseek-chat', 'apiKey': 'fixture-only-key', 'text': '周五发布。', 'locale': 'zh-CN',
                   'meetingID': 'fixture-meeting', 'inputFingerprint': 'a' * 64}
+        API.streaming_enabled.set()
         send('request-1', 'summary/generate', params)
         progress = []
         while True:
@@ -66,6 +83,8 @@ def main():
             if message.get('method') == 'summary/progress':
                 assert message['params']['requestID'] == 'request-1'
                 progress.append(message['params'])
+                if message['params'].get('draft') == '结论：':
+                    API.partial_seen.set()
                 continue
             assert message['id'] == 'request-1'
             result = message['result']
@@ -73,14 +92,16 @@ def main():
             assert result['meetingID'] == params['meetingID'] and result['inputFingerprint'] == params['inputFingerprint']
             assert result['usage'] == {'inputTokens': 21, 'outputTokens': 8}
             break
-        assert progress and len(API.calls) == 1
+        assert API.partial_seen.is_set() and len(API.calls) == 1
+        assert any(p.get('draft') == '结论：周五发布。' for p in progress)
+        API.streaming_enabled.clear()
         process.stdin.close()
         assert process.wait(timeout=5) == 0
         assert not process.stderr.read()
         if args.swift:
             environment = dict(os.environ, MEETING_TEST_SUMMARY_BASE_URL=base)
             subprocess.run([str(ROOT / 'scripts/test.sh'), '--filter', 'rustSummaryProviderIntegration'], cwd=ROOT, env=environment, check=True)
-        print('PASS: native Rust backend handshake, progress, IDs, HTTP auth/path, result, usage and clean exit')
+        print('PASS: streamed SSE → Rust → RPC drafts before HTTP completion; Unicode, usage and clean exit')
     finally:
         if process.poll() is None:
             process.terminate()

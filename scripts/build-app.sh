@@ -25,6 +25,7 @@ build_commit="$(git rev-parse --short HEAD 2>/dev/null || print uncommitted)"
 /usr/libexec/PlistBuddy -c "Add :MICommit string $build_commit" "$app_path/Contents/Info.plist"
 cp Resources/AppIcon.icns "$app_path/Contents/Resources/AppIcon.icns"
 cp Sources/MeetingCore/Resources/TranscriptExport.html "$app_path/Contents/Resources/TranscriptExport.html"
+cp Sources/MeetingCore/Resources/AppIcon.png "$app_path/Contents/Resources/AppIcon.png"
 # A stable signing identity lets Keychain recognize subsequent local builds.
 # An explicit identity wins; auto-select only an unambiguous Apple identity.
 signing_identity="${MEETING_CODESIGN_IDENTITY:-}"

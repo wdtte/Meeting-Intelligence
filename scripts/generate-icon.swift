@@ -39,5 +39,10 @@ for (name, dimension) in variants {
     let data = bitmap.representation(using: .png, properties: [:])!
     try data.write(to: iconset.appendingPathComponent("\(name).png"))
     if dimension == 1024 { try data.write(to: output.appendingPathComponent("AppIcon.png")) }
+    if name == "icon_128x128" {
+        let exportIcon = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/MeetingCore/Resources/AppIcon.png")
+        try data.write(to: exportIcon)
+    }
 }
 print("Rendered \(iconset.path)")

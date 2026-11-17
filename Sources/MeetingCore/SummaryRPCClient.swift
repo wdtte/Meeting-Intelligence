@@ -17,6 +17,7 @@ public enum SummaryRPCError: Error, LocalizedError, Sendable {
 /// One managed backend connection per summary. Separate connections may run
 /// concurrently; every response and progress notification is matched by ID.
 final class SummaryRPCClient: Sendable {
+    private enum Event: Sendable { case progress(SummaryProgress), result(Data) }
     static let maxMessageBytes = 8 * 1024 * 1024
     private struct State {
         var process: Process?
@@ -34,12 +35,25 @@ final class SummaryRPCClient: Sendable {
         let input = try Self.frame(id: id, method: "summary/generate", params: params)
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
-            return try await withCheckedThrowingContinuation { continuation in
+            let events = AsyncThrowingStream<Event, Error> { continuation in
                 DispatchQueue.global(qos: .utility).async { [self] in
-                    do { continuation.resume(returning: try execute(id: id, input: input, progress: progress)) }
-                    catch { continuation.resume(throwing: error) }
+                    do {
+                        let result = try execute(id: id, input: input) { continuation.yield(.progress($0)) }
+                        continuation.yield(.result(result)); continuation.finish()
+                    } catch { continuation.finish(throwing: error) }
                 }
             }
+            // A single consumer preserves progress order and drains callbacks
+            // before returning the final result; no detached per-token tasks.
+            for try await event in events {
+                try Task.checkCancellation()
+                switch event {
+                case .progress(let update): await progress(update)
+                case .result(let data): return data
+                }
+            }
+            try Task.checkCancellation()
+            throw SummaryRPCError.invalidResponse
         } onCancel: { self.cancel() }
     }
     private func cancel() {
@@ -65,7 +79,7 @@ final class SummaryRPCClient: Sendable {
             }
         }
     }
-    private func execute(id: String, input: Data, progress: @escaping SummaryProgressHandler) throws -> Data {
+    private func execute(id: String, input: Data, progress: @escaping @Sendable (SummaryProgress) -> Void) throws -> Data {
         let process = Process(), stdin = Pipe(), stdout = Pipe()
         _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         process.executableURL = try executable ?? Self.backendURL()
@@ -104,7 +118,7 @@ final class SummaryRPCClient: Sendable {
         return result
     }
     private func response(reader: SummaryRPCFrameReader, process: Process, id: String,
-                          progress: @escaping SummaryProgressHandler) throws -> Data {
+                          progress: @escaping @Sendable (SummaryProgress) -> Void) throws -> Data {
         while let bytes = try reader.next() {
             if state.withLock({ $0.cancelled }) { throw CancellationError() }
             guard let message = try JSONSerialization.jsonObject(with: bytes) as? [String: Any], message["jsonrpc"] as? String == "2.0" else {
@@ -116,8 +130,9 @@ final class SummaryRPCClient: Sendable {
                 let data = try JSONSerialization.data(withJSONObject: params)
                 let update = try JSONDecoder().decode(SummaryProgress.self, from: data)
                 guard update.completed >= 0, update.total >= update.completed else { throw SummaryRPCError.invalidResponse }
+                guard (update.draft?.unicodeScalars.count ?? 0) <= 4_000 else { throw SummaryRPCError.invalidResponse }
                 armWatchdog()
-                Task { await progress(update) }
+                progress(update)
                 continue
             }
             guard message["id"] as? String == id else { throw SummaryRPCError.invalidResponse }

@@ -333,6 +333,13 @@ final class AppModel {
         guard preparePlayback(id) else { return }
         playback.toggle()
     }
+    @discardableResult func togglePagePlayback() -> Bool {
+        guard page == .meetings, let id = selectedRecording?.id, !isBusy,
+              renamingRecordingID == nil, deletingRecordingID == nil, deletionCandidate == nil, errorMessage == nil,
+              preparePlayback(id) else { return false }
+        playback.toggle()
+        return true
+    }
     func playSegment(_ segment: TranscriptSegment, recordingID: UUID) {
         guard preparePlayback(recordingID) else { return }
         playback.seek(to: segment.start)

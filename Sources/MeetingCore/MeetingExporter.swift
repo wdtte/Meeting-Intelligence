@@ -75,6 +75,11 @@ enum TranscriptHTMLWriter {
             throw MeetingError.message("导出页面模板缺失，请重新安装应用。")
         }
         let template = try String(contentsOf: templateURL, encoding: .utf8)
+        guard let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "png")
+            ?? Bundle.module.url(forResource: "AppIcon", withExtension: "png") else {
+            throw MeetingError.message("导出图标缺失，请重新安装应用。")
+        }
+        let icon = "data:image/png;base64," + (try Data(contentsOf: iconURL)).base64EncodedString()
         let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let date = DateFormatter()
         date.locale = Locale(identifier: "zh_CN")
@@ -82,6 +87,7 @@ enum TranscriptHTMLWriter {
         let completed = transcript.status == "completed" && (transcript.cloud == nil || transcript.cloud?.status == "completed")
         let values = [
             "NONCE": nonce,
+            "APP_ICON": icon,
             "TITLE": escape(recording.title),
             "APPLICATION": escape(recording.applicationName),
             "DATE": escape(date.string(from: recording.startedAt)),

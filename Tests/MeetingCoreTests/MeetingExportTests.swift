@@ -62,6 +62,9 @@ private func htmlFixtureAudio(recording: inout Recording, store: RecordingStore)
     defer { try? FileManager.default.removeItem(at: store.root) }
     try htmlFixtureAudio(recording: &recording, store: store)
     let destination = store.root.appendingPathComponent("meeting.html")
+    transcript.summary = TranscriptSummary(inputFingerprint: transcript.summaryRequest.fingerprint)
+    transcript.summary?.status = "completed"
+    transcript.summary?.text = "结论：优化会议回顾体验。\n待办：周五发布；负责人未指定。"
     try await MeetingExporter.export(recording, transcript: transcript, store: store, kind: .transcriptAndAudio, to: destination)
     let html = try String(contentsOf: destination, encoding: .utf8)
     let marker = try #require(html.range(of: "data:audio/mp4;base64,"))
@@ -83,6 +86,15 @@ private func htmlFixtureAudio(recording: inout Recording, store: RecordingStore)
     #expect(peaks.prefix(25).allSatisfy { $0 == 0 })
     #expect(peaks.dropFirst(45).contains { $0 > 25 })
     #expect(html.contains("media-src data:"))
+    #expect(html.contains("img-src data:"))
+    #expect(html.contains("rel=\"icon\" type=\"image/png\" href=\"data:image/png;base64,"))
+    #expect(html.contains("class=\"mark\" src=\"data:image/png;base64,"))
+    #expect(!html.contains("{{APP_ICON}}"))
+    for speed in PlaybackSpeed.allCases {
+        let value = speed.rawValue == 1 || speed.rawValue == 2 || speed.rawValue == 3 ? String(Int(speed.rawValue)) : String(speed.rawValue)
+        #expect(html.contains("<option value=\"\(value)\""))
+    }
+    #expect(html.contains("上一句") && html.contains("下一句") && html.contains("空格键"))
     #expect(try FileManager.default.contentsOfDirectory(atPath: store.root.path).allSatisfy { !$0.hasPrefix(".meeting-export-") })
     if let previewPath = ProcessInfo.processInfo.environment["MI_EXPORT_PREVIEW_DIR"] {
         let preview = URL(fileURLWithPath: previewPath, isDirectory: true)

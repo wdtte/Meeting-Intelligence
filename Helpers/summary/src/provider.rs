@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use reqwest::{Client, Response, StatusCode, Url, redirect::Policy};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 const CHUNK_CHARACTERS: usize = 12_000;
 const MAX_RESULT_CHARACTERS: usize = 4_000;
@@ -46,6 +49,8 @@ pub struct Progress {
     pub stage: &'static str,
     pub completed: usize,
     pub total: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draft: Option<String>,
 }
 pub type ProgressHandler = Arc<dyn Fn(Progress) + Send + Sync>;
 
@@ -94,7 +99,7 @@ impl OpenAICompatibleProvider {
         input: &SummaryInput,
         path: &str,
         body: Option<Value>,
-    ) -> Result<(StatusCode, Value), ProviderError> {
+    ) -> Result<Response, ProviderError> {
         let url = format!("{}/{path}", input.base_url.trim().trim_end_matches('/'));
         let request = if let Some(body) = body {
             self.client.post(url).json(&body)
@@ -116,21 +121,19 @@ impl OpenAICompatibleProvider {
                     true,
                 )
             })?;
-        let status = response.status();
-        if !status.is_success() {
-            return Ok((status, Value::Null));
-        }
-        Ok((status, read_json(response).await?))
+        Ok(response)
     }
     async fn model(&self, input: &SummaryInput) -> Result<String, ProviderError> {
         if let Some(model) = &input.model {
             return Ok(model.trim().to_owned());
         }
-        let (status, value) = self.request(input, "models", None).await?;
+        let response = self.request(input, "models", None).await?;
+        let status = response.status();
         if [403, 404, 405, 501].contains(&status.as_u16()) {
             return Ok("gpt-4o-mini".into());
         }
         check_status(status)?;
+        let value = read_json(response).await?;
         let items = value.get("data").and_then(Value::as_array).ok_or_else(|| {
             ProviderError::new("invalid_response", "摘要服务模型列表无效。", false)
         })?;
@@ -175,6 +178,8 @@ impl OpenAICompatibleProvider {
         model: &str,
         text: &str,
         merging: bool,
+        update: Progress,
+        progress: &ProgressHandler,
     ) -> Result<(String, Option<Usage>, Option<String>), ProviderError> {
         let language = if input.locale.to_lowercase().starts_with("zh") {
             "简体中文"
@@ -189,17 +194,34 @@ impl OpenAICompatibleProvider {
         } else {
             "请总结以下会议转写。"
         };
-        let (status, value) = self
+        let response = self
             .request(
                 input,
                 "chat/completions",
                 Some(json!({
-                    "model": model, "messages": [{"role":"system", "content":instruction},
+                    "model": model, "stream": true, "stream_options": {"include_usage": true}, "messages": [{"role":"system", "content":instruction},
                         {"role":"user", "content":format!("{prompt}\n\n{text}")}]
                 })),
             )
             .await?;
-        check_status(status)?;
+        check_status(response.status())?;
+        let streaming = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| {
+                v.split(';')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .eq_ignore_ascii_case("text/event-stream")
+            });
+        let value = if streaming {
+            read_completion_stream(response, update, progress).await?
+        } else {
+            // Reuse responses from services ignoring stream=true; never re-POST.
+            read_json(response).await?
+        };
         let choice = value
             .get("choices")
             .and_then(Value::as_array)
@@ -263,6 +285,7 @@ impl SummaryProvider for OpenAICompatibleProvider {
             stage: "discovering",
             completed: 0,
             total: 0,
+            draft: None,
         });
         let model = self.model(&input).await?;
         let mut parts = split_text(&input.text, CHUNK_CHARACTERS);
@@ -276,10 +299,19 @@ impl SummaryProvider for OpenAICompatibleProvider {
                 stage,
                 completed: 0,
                 total: parts.len(),
+                draft: Some(String::new()),
             });
             for part in &parts {
-                let (text, used, returned_model) =
-                    self.complete(&input, &model, part, merging).await?;
+                let update = Progress {
+                    stage,
+                    completed: results.len(),
+                    total: parts.len(),
+                    draft: Some(String::new()),
+                };
+                progress(update.clone());
+                let (text, used, returned_model) = self
+                    .complete(&input, &model, part, merging, update, &progress)
+                    .await?;
                 if let Some(returned_model) = returned_model {
                     actual_model = returned_model;
                 }
@@ -290,11 +322,12 @@ impl SummaryProvider for OpenAICompatibleProvider {
                     }),
                     _ => None,
                 };
-                results.push(text);
+                results.push(text.clone());
                 progress(Progress {
                     stage,
                     completed: results.len(),
                     total: parts.len(),
+                    draft: Some(text),
                 });
             }
             if results.len() == 1 {
@@ -389,6 +422,160 @@ pub fn split_text(text: &str, size: usize) -> Vec<String> {
     }
     result
 }
+/// Buffer complete SSE lines so HTTP chunks may split UTF-8 or CRLF safely.
+#[derive(Default)]
+struct CompletionStream {
+    line: Vec<u8>,
+    data: Vec<String>,
+    text: String,
+    characters: usize,
+    model: Option<String>,
+    usage: Option<Value>,
+    finish: bool,
+    done: bool,
+}
+impl CompletionStream {
+    fn feed(&mut self, bytes: &[u8]) -> Result<(), ProviderError> {
+        for byte in bytes {
+            if *byte == b'\n' {
+                let line = std::mem::take(&mut self.line);
+                let line = std::str::from_utf8(&line)
+                    .map_err(|_| invalid_stream())?
+                    .trim_end_matches('\r')
+                    .trim_start_matches('\u{feff}');
+                if line.is_empty() {
+                    self.event()?;
+                } else if let Some(data) = line.strip_prefix("data:") {
+                    self.data
+                        .push(data.strip_prefix(' ').unwrap_or(data).to_owned());
+                }
+            } else {
+                self.line.push(*byte);
+            }
+            if self.done {
+                break;
+            }
+        }
+        Ok(())
+    }
+    fn event(&mut self) -> Result<(), ProviderError> {
+        if self.data.is_empty() {
+            return Ok(());
+        }
+        let data = std::mem::take(&mut self.data).join("\n");
+        if data == "[DONE]" {
+            self.done = true;
+            return Ok(());
+        }
+        let value: Value = serde_json::from_str(&data).map_err(|_| invalid_stream())?;
+        if value.get("error").is_some_and(|v| !v.is_null()) {
+            return Err(invalid_stream());
+        }
+        if let Some(model) = value["model"].as_str().filter(|m| !m.is_empty()) {
+            self.model = Some(model.to_owned());
+        }
+        if value["usage"].is_object() {
+            self.usage = Some(value["usage"].clone());
+        }
+        if let Some(choice) = value["choices"]
+            .as_array()
+            .and_then(|c| c.iter().find(|c| c["index"].as_u64().unwrap_or(0) == 0))
+        {
+            let delta = &choice["delta"];
+            if delta
+                .get("refusal")
+                .is_some_and(|v| !v.is_null() && v.as_str() != Some(""))
+            {
+                return Err(ProviderError::new(
+                    "empty_result",
+                    "摘要服务未返回有效文本。",
+                    true,
+                ));
+            }
+            if let Some(text) = delta["content"].as_str() {
+                if self.finish && !text.is_empty() {
+                    return Err(invalid_stream());
+                }
+                self.characters += text.chars().count();
+                if self.characters > MAX_RESULT_CHARACTERS {
+                    return Err(ProviderError::new(
+                        "oversized_result",
+                        "摘要过长，请检查服务模型后重试。",
+                        true,
+                    ));
+                }
+                self.text.push_str(text);
+            }
+            if let Some(reason) = choice["finish_reason"].as_str() {
+                if reason == "length" {
+                    return Err(ProviderError::new(
+                        "truncated",
+                        "摘要被服务截断，请检查模型输出限制后重试。",
+                        true,
+                    ));
+                }
+                if reason != "stop" {
+                    return Err(invalid_stream());
+                }
+                self.finish = true;
+            }
+        }
+        Ok(())
+    }
+}
+fn invalid_stream() -> ProviderError {
+    ProviderError::new(
+        "invalid_response",
+        "摘要流式响应无效或提前中断，请显式重试；请求可能已经计费。",
+        true,
+    )
+}
+async fn read_completion_stream(
+    mut response: Response,
+    mut update: Progress,
+    progress: &ProgressHandler,
+) -> Result<Value, ProviderError> {
+    let mut stream = CompletionStream::default();
+    let mut received = 0;
+    let mut published = String::new();
+    let mut last_update = Instant::now();
+    while let Some(chunk) = response.chunk().await.map_err(|_| invalid_stream())? {
+        received += chunk.len();
+        if received > MAX_HTTP_BYTES {
+            return Err(ProviderError::new(
+                "oversized_response",
+                "摘要服务响应过大。",
+                true,
+            ));
+        }
+        stream.feed(&chunk)?;
+        if stream.text != published
+            && (published.is_empty()
+                || last_update.elapsed() >= Duration::from_millis(40)
+                || stream.done)
+        {
+            published.clone_from(&stream.text);
+            update.draft = Some(published.clone());
+            progress(update.clone());
+            last_update = Instant::now();
+        }
+        if stream.done {
+            break;
+        }
+    }
+    // Accept EOF after a complete stop event for compatible services omitting
+    // [DONE], but never accept an incomplete event or missing finish reason.
+    if !stream.finish || !stream.line.is_empty() || !stream.data.is_empty() {
+        return Err(invalid_stream());
+    }
+    if stream.text != published {
+        update.draft = Some(stream.text.clone());
+        progress(update);
+    }
+    Ok(
+        json!({"model":stream.model,"usage":stream.usage,"choices":[{"finish_reason":"stop","message":{"content":stream.text}}]}),
+    )
+}
 async fn read_json(mut response: Response) -> Result<Value, ProviderError> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response
@@ -419,4 +606,69 @@ fn check_status(status: StatusCode) -> Result<(), ProviderError> {
         code => format!("摘要请求失败（HTTP {code}），请检查配置后显式重试。"),
     };
     Err(ProviderError::new("http", message, true))
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    fn event(value: Value) -> String {
+        format!("data: {value}\r\n\r\n")
+    }
+    #[test]
+    fn every_byte_boundary_preserves_unicode_crlf_usage_and_model() {
+        let body = format!(
+            ": heartbeat\r\n\r\n{}{}{}data: [DONE]\r\n\r\n",
+            event(json!({"model":"fixture","choices":[{"index":0,"delta":{"content":"结论："}}]})),
+            event(
+                json!({"choices":[{"index":0,"delta":{"content":"周五发布👩🏽‍💻"},"finish_reason":"stop"}]})
+            ),
+            event(json!({"choices":[],"usage":{"prompt_tokens":21,"completion_tokens":8}}))
+        );
+        for boundary in 0..=body.len() {
+            let mut stream = CompletionStream::default();
+            stream.feed(&body.as_bytes()[..boundary]).unwrap();
+            stream.feed(&body.as_bytes()[boundary..]).unwrap();
+            assert_eq!(stream.text, "结论：周五发布👩🏽‍💻");
+            assert_eq!(stream.model.as_deref(), Some("fixture"));
+            assert_eq!(stream.usage.unwrap()["prompt_tokens"], 21);
+            assert!(stream.finish && stream.done);
+        }
+        let mut stream = CompletionStream::default();
+        for byte in body.bytes() {
+            stream.feed(&[byte]).unwrap();
+        }
+        assert_eq!(stream.text, "结论：周五发布👩🏽‍💻");
+    }
+    #[test]
+    fn invalid_refused_truncated_and_oversized_streams_fail() {
+        for (body, kind) in [
+            ("data: invalid\n\n".into(), "invalid_response"),
+            (
+                event(json!({"error":{"message":"secret server body"}})),
+                "invalid_response",
+            ),
+            (
+                event(json!({"choices":[{"delta":{"refusal":"refused"}}]})),
+                "empty_result",
+            ),
+            (
+                event(json!({"choices":[{"delta":{},"finish_reason":"length"}]})),
+                "truncated",
+            ),
+            (
+                event(json!({"choices":[{"delta":{},"finish_reason":"content_filter"}]})),
+                "invalid_response",
+            ),
+            (
+                event(json!({"choices":[{"delta":{"content":"字".repeat(4001)}}]})),
+                "oversized_result",
+            ),
+        ] {
+            let error = CompletionStream::default()
+                .feed(body.as_bytes())
+                .unwrap_err();
+            assert_eq!(error.kind, kind);
+            assert!(!error.message.contains("secret server body"));
+        }
+    }
 }
