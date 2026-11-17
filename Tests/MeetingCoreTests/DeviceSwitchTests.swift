@@ -94,7 +94,8 @@ private func routeBuffer(rate: Double, channels: AVAudioChannelCount, value: Flo
     #expect(recovery.advance(now: 112) == .expired)
 }
 
-@Test func deviceSwitchPlaybackMixesFormatsPreservesGapsAndSeeks() throws {
+@Test(arguments: [false, true])
+func deviceSwitchPlaybackMixesFormatsPreservesGapsAndSeeks(delayedEnqueue: Bool) throws {
     let store = try RecordingStore(root: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
     defer { try? FileManager.default.removeItem(at: store.root) }
     let app = routeBuffer(rate: 48000, channels: 2, value: 0.05)
@@ -138,7 +139,7 @@ private func routeBuffer(rate: Double, channels: AVAudioChannelCount, value: Flo
         }
         return samples
     }
-    let mixed = try render(from: 0, source: nil, delayedEnqueue: true)
+    let mixed = try render(from: 0, source: nil, delayedEnqueue: delayedEnqueue)
     #expect(abs(mixed[2400]) < 0.001)
     #expect(abs(mixed[7200] - 0.11) < 0.005)
     #expect(abs(mixed[14400]) < 0.001)

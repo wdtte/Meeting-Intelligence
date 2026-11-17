@@ -23,7 +23,10 @@ cargo test --locked --manifest-path Helpers/summary/Cargo.toml
 
 ## Automatic GitHub releases
 
-- Workflow: `.github/workflows/release.yml`. Pushing any tag to GitHub builds and publishes a Release for that tag. Pushing `main`, opening a pull request against `main`, or manually running the workflow validates both builds without publishing a Release unless the selected ref is a tag.
+- Workflow: `.github/workflows/release.yml`. Pushing any tag to GitHub builds and publishes a Release for that tag. The Release workflow also supports manual dual-architecture validation on a branch without publishing. `.github/workflows/ci.yml` runs Swift/Rust tests on Intel for `main` pushes and pull requests, without release compilation or packaging.
+- Ordinary CI cancels superseded runs per branch/PR; release runs are grouped by ref and tags are never automatically cancelled.
+- `.github/actions/setup-build/action.yml` pins Rust 1.99.1 and caches `.build`, Cargo registry/git, and Rust target outputs. Keys isolate OS, architecture, actual Xcode/SDK/Swift/Rust versions, and dependency manifests; commit suffixes and restore prefixes refresh caches across source changes. Credentials, app bundles, and `dist/` are excluded. Debug tests and native-target release builds retain separate compiler outputs. Caching does not remove runner queue time.
+- `scripts/ci-timing-summary.py` adds queue and step durations to the job summary; timing API failures do not fail a build.
 - The build matrix uses `macos-26` for Apple Silicon (`arm64`) and `macos-26-intel` for Intel (`x86_64`). Each job runs Swift and Rust tests, builds the app, and uploads an architecture-specific ZIP and SHA-256 checksum.
 - `scripts/package-release.sh` packages the signed app, README, and MIT license. Release assets are named `Meeting-Intelligence-X.Y.Z-macos-ARCH.zip` and `.zip.sha256`. These are separate native builds, not a universal binary.
 - Version tags should use `vX.Y.Z` (for example `v0.2.4`). Tags such as `v0.2.4-rc.1` publish a prerelease. The numeric version is injected into the built app through `MEETING_APP_VERSION`; `MEETING_BUILD_NUMBER` uses the Actions run number. Other tag names still publish a Release and retain the version from `Resources/Info.plist`.
