@@ -10,13 +10,13 @@ struct SpeechModelControls: View {
                 Text("English (US)").tag("en-US")
             }.disabled(model.modelPreparing)
             HStack {
-                Button(model.modelPreparing ? "正在准备模型…" : "重新检查系统语音资源") {
+                Button(model.modelPreparing ? "正在准备模型…" : "重新检查转写资源") {
                     Task { await model.prepareSpeechModel() }
                 }.disabled(model.modelPreparing)
                 if model.modelPreparing { ProgressView().controlSize(.small) }
             }
             Text(model.modelStatus).font(.caption).foregroundStyle(.secondary)
-            Text("默认使用中文，通过 macOS 语音转写服务在本机处理。语言资源由 Apple 管理，缺少时自动下载，无需另装模型。")
+            Text(LocalTranscriber.resourceDescription)
                 .font(.callout).foregroundStyle(.secondary)
         }
     }

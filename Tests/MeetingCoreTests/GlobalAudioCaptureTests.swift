@@ -10,7 +10,7 @@ import Testing
     // recording starts. It must not be narrowed by a PID or bundle ID list.
     #expect(description.isExclusive)
     #expect(description.processes.isEmpty)
-    #expect(description.bundleIDs.isEmpty)
+    if #available(macOS 26.0, *) { #expect(description.bundleIDs.isEmpty) }
     #expect(description.isMixdown)
     #expect(!description.isMono)
     #expect(description.isPrivate)

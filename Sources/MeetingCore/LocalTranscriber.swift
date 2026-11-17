@@ -4,7 +4,8 @@ import Speech
 
 /// Reads closed files, never shares capture buffers or blocks the real-time writer.
 /// Each file is bounded to ten seconds; a slow recognizer catches up from disk.
-public enum LocalTranscriber {
+@available(macOS 26.0, *)
+enum AppleSpeechTranscriber {
     public static func prepare(locale identifier: String, download: Bool) async throws -> String {
         try await SpeechAssetPreparation.shared.prepare(locale: identifier, download: download)
     }
@@ -56,9 +57,11 @@ public enum LocalTranscriber {
                 let end = result.range.end.seconds
                 guard start.isFinite, end.isFinite else { throw MeetingError.message("语音引擎返回了无效时间戳。") }
                 guard !text.isEmpty else { continue }
-                segments.append(TranscriptSegment(chunkID: chunk.id, source: chunk.audioSource,
+                var segment = TranscriptSegment(chunkID: chunk.id, source: chunk.audioSource,
                     start: chunk.offset + min(chunk.duration, max(0, start)),
-                    end: chunk.offset + min(chunk.duration, max(start, end)), text: text))
+                    end: chunk.offset + min(chunk.duration, max(start, end)), text: text)
+                segment.engine = "Apple SpeechTranscriber"
+                segments.append(segment)
             }
             return segments
         }
@@ -86,13 +89,14 @@ public enum LocalTranscriber {
 
 // Settings preparation and recording jobs may request the same assets together.
 // Share the in-flight operation so only one installation request runs per locale.
+@available(macOS 26.0, *)
 private actor SpeechAssetPreparation {
     static let shared = SpeechAssetPreparation()
     private var tasks: [String: Task<String, Error>] = [:]
     func prepare(locale: String, download: Bool) async throws -> String {
         let key = locale.replacingOccurrences(of: "-", with: "_").lowercased() + (download ? ":install" : ":check")
         if let task = tasks[key] { return try await task.value }
-        let task = Task { try await LocalTranscriber.install(locale: locale, download: download) }
+        let task = Task { try await AppleSpeechTranscriber.install(locale: locale, download: download) }
         tasks[key] = task
         defer { tasks[key] = nil }
         return try await task.value

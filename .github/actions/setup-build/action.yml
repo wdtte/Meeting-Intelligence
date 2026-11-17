@@ -1,6 +1,10 @@
 name: Set up build toolchain and cache
 description: Select pinned Rust and restore architecture- and toolchain-specific caches.
 inputs:
+  edition:
+    description: Isolate standard and compatibility compiler outputs.
+    required: false
+    default: standard
   cache-profile:
     description: Separate test-only caches from caches containing release build outputs.
     required: false
@@ -13,10 +17,15 @@ runs:
       shell: bash
       env:
         CACHE_PROFILE: ${{ inputs.cache-profile }}
+        BUILD_EDITION: ${{ inputs.edition }}
       run: |
         case "$CACHE_PROFILE" in
           test|release) ;;
           *) echo 'cache-profile must be test or release' >&2; exit 2 ;;
+        esac
+        case "$BUILD_EDITION" in
+          standard|compatibility) ;;
+          *) echo 'edition must be standard or compatibility' >&2; exit 2 ;;
         esac
         if ! rustup run 1.99.1 rustc --version > /dev/null 2>&1; then
           rustup toolchain install 1.99.1 --profile minimal
@@ -44,8 +53,10 @@ runs:
           ~/.cargo/git/db
         # Cache entries are immutable. Test CI must not claim a Release cache key
         # before the optimized binaries have been built and saved.
-        key: build-v2-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-${{ github.sha }}
+        key: build-v3-${{ inputs.edition }}-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-${{ github.sha }}
         restore-keys: |
+          build-v3-${{ inputs.edition }}-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-
+          build-v3-${{ inputs.edition }}-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-
           build-v2-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-
           build-v2-${{ inputs.cache-profile }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-
           build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Helpers/summary/Cargo.lock', 'Package.swift', '**/Package.resolved') }}-

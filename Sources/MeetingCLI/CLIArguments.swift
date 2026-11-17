@@ -160,7 +160,7 @@ struct CLIArguments {
             }.joined(separator: "\n") + "\n"
         }
         return """
-        meeting 1.0.0 — 只读会议转写 CLI（macOS 26+）
+        meeting 1.0.0 — 只读会议转写 CLI（macOS \(LocalTranscriber.minimumSystemVersion)+）
         Usage: meeting <command> [options]
 
         \(CLICommand.all.map { "  \($0.name.padding(toLength: 12, withPad: " ", startingAt: 0))\($0.summary)" }.joined(separator: "\n"))

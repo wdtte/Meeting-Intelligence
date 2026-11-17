@@ -25,7 +25,9 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
     public var error: String?
     public var cloud: CloudTranscriptionProgress?
     public var summary: TranscriptSummary?
-    public init(recordingID: UUID, locale: String) { self.recordingID = recordingID; self.locale = locale }
+    public init(recordingID: UUID, locale: String) {
+        self.recordingID = recordingID; self.locale = locale; self.engine = LocalTranscriber.engine
+    }
     public mutating func commit(_ results: [TranscriptSegment], for chunk: AudioChunk) throws {
         guard results.allSatisfy({ $0.chunkID == chunk.id && $0.source == chunk.audioSource }) else {
             throw MeetingError.message("转写角色与音频来源不匹配。")
@@ -37,6 +39,10 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
         segments.append(contentsOf: results)
         segments.sort { $0.start == $1.start ? $0.source.rawValue < $1.source.rawValue : $0.start < $1.start }
         processedChunks.insert(chunk.id)
+        // Preserve the provenance of old Apple segments when resuming with Whisper.
+        if !segments.isEmpty {
+            engine = Set(segments.map { $0.engine ?? "Apple SpeechTranscriber" }).sorted().joined(separator: " + ")
+        }
         // A summary describes a specific transcript snapshot. Never export stale text.
         if let summary, summary.inputFingerprint != summaryRequest.fingerprint { self.summary = nil }
     }
