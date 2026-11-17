@@ -495,11 +495,7 @@ func localOnlyRecordingCanAddCloudAfterRecordingWithoutRepeatingLocalWork(whileL
     document.cloud = progress
     try document.save(to: URL(fileURLWithPath: recording.transcriptPath!))
     // Existing jobs are query-only: no fixture audio files or upload replies are needed.
-    let http = ScriptedHTTP([
-        .init(body: #"{"output":{"task_status":"FAILED","code":"SUCCESS_WITH_NO_VALID_FRAGMENT"}}"#),
-        .init(body: #"{"output":{"task_status":"SUCCEEDED","results":[{"subtask_status":"SUCCEEDED","transcription_url":"https://result.oss-cn-beijing.aliyuncs.com/result.json"}]}}"#),
-        .init(body: cloudText)
-    ])
+    let http = SavedTasksHTTP()
     let factory: TranscriptionCoordinator.CloudFactory = { QwenTranscriptionProvider(configuration: $0, apiKey: "fixture", transport: http) }
     let coordinator = TranscriptionCoordinator(prepare: { $0 }, recognize: { _, _, _ in Issue.record("must not redo local work"); return [] }, cloudFactory: factory)
     coordinator.load(recording)
@@ -524,4 +520,170 @@ func localOnlyRecordingCanAddCloudAfterRecordingWithoutRepeatingLocalWork(whileL
     await reopened.wait(for: recording.id)
     #expect(await http.requests.count == 3)
     #expect(reopened.documents[recording.id]?.cloud?.noSpeechCount == 1)
+}
+
+// Responses follow task identity because concurrent polling has no fixed request order.
+private actor SavedTasksHTTP: TranscriptionHTTPTransport {
+    var requests: [URLRequest] = []
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        let body: String
+        switch request.url?.lastPathComponent {
+        case "no-words": body = #"{"output":{"task_status":"FAILED","code":"SUCCESS_WITH_NO_VALID_FRAGMENT"}}"#
+        case "following": body = #"{"output":{"task_status":"SUCCEEDED","results":[{"subtask_status":"SUCCEEDED","transcription_url":"https://result.oss-cn-beijing.aliyuncs.com/result.json"}]}}"#
+        case "result.json": body = cloudText
+        default: throw MeetingError.message("unexpected HTTP request")
+        }
+        return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+}
+
+private actor ConcurrentCloud: TranscriptionProvider {
+    nonisolated let id = TranscriptionProviderID.qwen
+    nonisolated let engine = "Concurrent fixture"
+    var requests: [TranscriptionRequest] = []
+    var active = 0
+    var peak = 0
+    var released: Set<UUID> = []
+    var failing: Set<UUID> = []
+    func prepare(locale: String) async throws -> String { locale }
+    func release(_ id: UUID, fail: Bool = false) {
+        if fail { failing.insert(id) }
+        released.insert(id)
+    }
+    func transcribe(_ request: TranscriptionRequest, checkpoint: @escaping TranscriptionCheckpointHandler) async throws -> ProviderTranscription {
+        requests.append(request)
+        active += 1; peak = max(peak, active)
+        defer { active -= 1 }
+        if request.checkpoint == nil {
+            try await checkpoint(.init(phase: .submitted, taskID: request.chunk.id.uuidString))
+        }
+        while !released.contains(request.chunk.id) { try await Task.sleep(for: .milliseconds(1)) }
+        try Task.checkCancellation()
+        if failing.remove(request.chunk.id) != nil { throw MeetingError.message("fixture failure") }
+        return ProviderTranscription(segments: [.init(chunkID: request.chunk.id, source: request.chunk.audioSource,
+            start: request.chunk.offset, end: request.chunk.end, text: request.chunk.fileName)])
+    }
+}
+
+@MainActor private func waitForCloud(_ condition: () async -> Bool) async throws {
+    for _ in 0..<2000 {
+        if await condition() { return }
+        try await Task.sleep(for: .milliseconds(1))
+    }
+    throw MeetingError.message("Timed out waiting for concurrent cloud work")
+}
+
+private struct ConcurrentCloudFixture {
+    let root: URL
+    let store: RecordingStore
+    var recording: Recording
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("CloudConcurrency-\(UUID())")
+        store = try RecordingStore(root: root)
+        recording = Recording(title: "fixture", applicationName: "fixture", bundleIdentifier: "fixture")
+        recording.transcriptPath = root.appendingPathComponent("transcript.json").path
+        recording.cloudTranscription = .init(); recording.status = .completed
+        recording.chunks = (0..<7).map { index in
+            var chunk = fixtureChunk(source: index.isMultiple(of: 2) ? .application : .microphone, offset: Double(index * 10))
+            chunk.fileName = "\(index).wav"
+            return chunk
+        }
+        try store.save(recording)
+        var document = TranscriptDocument(recordingID: recording.id, locale: "zh-CN")
+        for chunk in recording.chunks {
+            try writeCloudFixture(store.audioURL(recording: recording.id, fileName: chunk.fileName), values: [0.01])
+            try document.commit([.init(chunkID: chunk.id, source: chunk.audioSource,
+                start: chunk.offset, end: chunk.end, text: "local")], for: chunk)
+        }
+        document.status = "completed"
+        try document.save(to: URL(fileURLWithPath: recording.transcriptPath!))
+    }
+    func clean() { try? FileManager.default.removeItem(at: root) }
+}
+
+@Test @MainActor func cloudUsesBoundedRollingConcurrencyAndCommitsOutOfOrderResults() async throws {
+    let fixture = try ConcurrentCloudFixture()
+    defer { fixture.clean() }
+    let recording = fixture.recording, chunks = recording.chunks, provider = ConcurrentCloud()
+    let coordinator = TranscriptionCoordinator(prepare: { $0 }, recognize: { _, _, _ in
+        Issue.record("must reuse local transcript"); return []
+    }, cloudFactory: { _ in provider })
+    coordinator.submit(recording, store: fixture.store)
+    try await waitForCloud { await provider.requests.count == 3 }
+    #expect(await provider.active == 3)
+    // Free one slot while the first two tasks remain blocked. The fourth must start.
+    await provider.release(chunks[2].id)
+    try await waitForCloud { await provider.requests.count == 4 }
+    #expect(coordinator.documents[recording.id]?.cloud?.jobs[chunks[2].id.uuidString]?.completed == true)
+    #expect(coordinator.documents[recording.id]?.cloud?.jobs[chunks[0].id.uuidString]?.completed == false)
+    for chunk in chunks { await provider.release(chunk.id) }
+    await coordinator.wait(for: recording.id)
+    let done = try #require(coordinator.documents[recording.id])
+    #expect(await provider.peak == 3)
+    #expect(await provider.requests.count == chunks.count)
+    #expect(done.cloud?.status == "completed")
+    #expect(done.cloud?.completedCount == chunks.count)
+    #expect(done.segments.map(\.text) == chunks.map(\.fileName))
+    #expect(done.segments.map(\.source) == chunks.map(\.audioSource))
+    #expect(try TranscriptDocument.load(from: URL(fileURLWithPath: recording.transcriptPath!), recordingID: recording.id) == done)
+}
+
+@Test @MainActor func concurrentCloudFailureDrainsAcceptedJobsAndRetriesOnlyUnfinishedWork() async throws {
+    let fixture = try ConcurrentCloudFixture()
+    defer { fixture.clean() }
+    let recording = fixture.recording, chunks = recording.chunks, provider = ConcurrentCloud()
+    let factory: TranscriptionCoordinator.CloudFactory = { _ in provider }
+    let coordinator = TranscriptionCoordinator(prepare: { $0 }, recognize: { _, _, _ in [] }, cloudFactory: factory)
+    coordinator.submit(recording, store: fixture.store)
+    try await waitForCloud { await provider.requests.count == 3 }
+    await provider.release(chunks[0].id, fail: true)
+    try await waitForCloud { await provider.active == 2 }
+    // Wait until the parent consumes the failure before releasing its siblings.
+    for _ in 0..<20 { await Task.yield() }
+    await provider.release(chunks[1].id)
+    await provider.release(chunks[2].id)
+    await coordinator.wait(for: recording.id)
+    #expect(await provider.requests.count == 3)
+    #expect(coordinator.documents[recording.id]?.cloud?.status == "failed")
+    #expect(coordinator.documents[recording.id]?.cloud?.completedCount == 2)
+    #expect(coordinator.documents[recording.id]?.segments.first?.text == "local")
+    for chunk in chunks { await provider.release(chunk.id) }
+    let reopened = TranscriptionCoordinator(prepare: { $0 }, recognize: { _, _, _ in [] }, cloudFactory: factory)
+    reopened.load(recording)
+    reopened.submit(recording, store: fixture.store, retry: true)
+    await reopened.wait(for: recording.id)
+    let requests = await provider.requests
+    #expect(requests.filter { $0.chunk.id == chunks[0].id }.last?.checkpoint?.taskID == chunks[0].id.uuidString)
+    #expect(requests.filter { $0.chunk.id == chunks[1].id }.count == 1)
+    #expect(requests.filter { $0.chunk.id == chunks[2].id }.count == 1)
+    #expect(reopened.documents[recording.id]?.cloud?.completedCount == chunks.count)
+    #expect(reopened.documents[recording.id]?.cloud?.status == "completed")
+}
+
+@Test @MainActor func concurrentCloudPausePersistsAllTaskIDsAndStopsLaunchingChunks() async throws {
+    let fixture = try ConcurrentCloudFixture()
+    defer { fixture.clean() }
+    let recording = fixture.recording, provider = ConcurrentCloud()
+    let coordinator = TranscriptionCoordinator(prepare: { $0 }, recognize: { _, _, _ in [] }, cloudFactory: { _ in provider })
+    coordinator.submit(recording, store: fixture.store)
+    try await waitForCloud {
+        coordinator.documents[recording.id]?.cloud?.jobs.values.filter { $0.checkpoint?.taskID != nil }.count == 3
+    }
+    coordinator.pause(recording.id)
+    await coordinator.wait(for: recording.id)
+    #expect(await provider.requests.count == 3)
+    #expect(await provider.active == 0)
+    let saved = try TranscriptDocument.load(from: URL(fileURLWithPath: recording.transcriptPath!), recordingID: recording.id)
+    #expect(saved.cloud?.status == "interrupted")
+    #expect(saved.cloud?.jobs.values.filter { $0.checkpoint?.taskID != nil }.count == 3)
+    #expect(saved.segments.allSatisfy { $0.text == "local" })
+    for chunk in recording.chunks { await provider.release(chunk.id) }
+    coordinator.submit(recording, store: fixture.store, retry: true)
+    await coordinator.wait(for: recording.id)
+    let requests = await provider.requests
+    for chunk in recording.chunks.prefix(3) {
+        #expect(requests.last { $0.chunk.id == chunk.id }?.checkpoint?.taskID == chunk.id.uuidString)
+    }
+    #expect(coordinator.documents[recording.id]?.cloud?.status == "completed")
 }

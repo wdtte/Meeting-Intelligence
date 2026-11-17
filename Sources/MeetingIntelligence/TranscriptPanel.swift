@@ -31,6 +31,8 @@ struct TranscriptPanel: View {
     let live: Bool
     @TranscriptViewState private var confirmCloudResubmission = false
     @TranscriptViewState private var followPlayback = true
+    private enum Page: Hashable { case transcript, summary }
+    @TranscriptViewState private var page = Page.transcript
     @TranscriptViewState private var detailsExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Observe the destination, not every playback tick. During silence keep the
@@ -102,12 +104,25 @@ struct TranscriptPanel: View {
                     }
                     cloudProgress
                     exportStatus
-                    if !live { transcriptDetails }
+                    if !live {
+                        HStack(spacing: 12) {
+                            Picker("会议内容", selection: $page) {
+                                Text("字幕").tag(Page.transcript)
+                                Text("会议摘要").tag(Page.summary)
+                            }.pickerStyle(.segmented).frame(width: 220)
+                            summaryStatus
+                        }
+                    }
                 }.padding(.horizontal, live ? 16 : 4).padding(.vertical, live ? 12 : 16)
 
                 if live { Divider().padding(.horizontal, 16) }
 
-                if segments.isEmpty {
+                if !live && page == .summary {
+                    LightScrollView {
+                        summarySection
+                            .padding(.horizontal, 4).padding(.top, 8).padding(.bottom, 24)
+                    }.frame(minHeight: 0, maxHeight: .infinity)
+                } else if segments.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: "text.bubble").font(.system(size: 28, weight: .light)).foregroundStyle(.tertiary)
                         Text(isRunning || live ? "正在等待识别到的发言" : document?.status == "completed" ? "未识别到语音" : "暂无转写内容")
@@ -118,6 +133,7 @@ struct TranscriptPanel: View {
                 } else {
                     LightScrollView {
                         LazyVStack(alignment: .leading, spacing: 4) {
+                            if !live, document?.cloud != nil { transcriptDetails.padding(.horizontal, 12).padding(.bottom, 8) }
                             ForEach(segments) { segment in
                                 TranscriptRow(segment: segment, live: live,
                                               active: !live && segment.contains(model.playback.position)) {
@@ -146,7 +162,7 @@ struct TranscriptPanel: View {
                 }
             }.frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         }
-        .onChange(of: recordingID) { _, _ in detailsExpanded = false }
+        .onChange(of: recordingID) { _, _ in detailsExpanded = false; page = .transcript }
         .confirmationDialog("重新提交未完成的云端任务？", isPresented: $confirmCloudResubmission) {
             Button("重新提交（可能重复计费）", role: .destructive) { model.resubmitCloudSelected() }
             Button("取消", role: .cancel) {}
@@ -155,40 +171,31 @@ struct TranscriptPanel: View {
         }
     }
 
-    // Keep the disclosure outside the scrolling utterances so playback following
-    // cannot scroll the summary out of view or change its expanded state.
-    private var transcriptDetails: some View {
-        DisclosureGroup(isExpanded: $detailsExpanded) {
-            VStack(alignment: .leading, spacing: 14) {
-                summarySection
-                if let cloud = document?.cloud {
-                    Divider()
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("转写详情").fontWeight(.medium)
-                        Text("跳过静音 \(AudioTimeline.clock(cloud.skippedSeconds)) · 按音轨累计")
-                        if cloud.noSpeechCount > 0 {
-                            Text("云端未识别到语音：\(cloud.noSpeechCount) 个片段，保留本地结果")
-                        }
-                        if cloud.jobs.values.contains(where: { $0.usage != nil }) {
-                            Text("输入 \(cloud.inputTokens) / 输出 \(cloud.outputTokens) Token")
-                        }
-                    }.font(.caption).foregroundStyle(.secondary)
-                }
-            }.padding(.top, 10).padding(.bottom, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
-            HStack(spacing: 8) {
-                Text("摘要与转写详情")
-                if isSummaryRunning {
-                    ProgressView().controlSize(.mini)
-                    Text(summaryProgressText)
-                } else if document?.summary?.error != nil {
-                    Text("摘要需重试").foregroundStyle(.orange)
-                } else if document?.currentSummary != nil {
-                    Text("摘要已生成").foregroundStyle(.tertiary)
-                }
-            }.font(.caption).foregroundStyle(.secondary)
+    @ViewBuilder private var summaryStatus: some View {
+        if isSummaryRunning {
+            ProgressView().controlSize(.mini)
+            Text(summaryProgressText).font(.caption).foregroundStyle(.secondary)
+        } else if document?.summary?.error != nil {
+            Text("摘要需重试").font(.caption).foregroundStyle(.orange)
+        } else if document?.currentSummary != nil {
+            Text("摘要已生成").font(.caption).foregroundStyle(.tertiary)
         }
+    }
+
+    private var transcriptDetails: some View {
+        DisclosureGroup("转写详情", isExpanded: $detailsExpanded) {
+            if let cloud = document?.cloud {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("跳过静音 \(AudioTimeline.clock(cloud.skippedSeconds)) · 按音轨累计")
+                    if cloud.noSpeechCount > 0 {
+                        Text("云端未识别到语音：\(cloud.noSpeechCount) 个片段，保留本地结果")
+                    }
+                    if cloud.jobs.values.contains(where: { $0.usage != nil }) {
+                        Text("输入 \(cloud.inputTokens) / 输出 \(cloud.outputTokens) Token")
+                    }
+                }.padding(.top, 8).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }.font(.caption).foregroundStyle(.secondary)
     }
 
     private var summaryProgressText: String {
@@ -241,23 +248,25 @@ struct TranscriptPanel: View {
 
     private func transcriptActions(_ proxy: ScrollViewProxy) -> some View {
         HStack(spacing: 10) {
-            HStack(spacing: 4) {
-                Toggle(isOn: $followPlayback) {
-                    Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                        .frame(width: 28, height: 28)
-                        .background(followPlayback ? Color.primary.opacity(0.07) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 6))
-                }.toggleStyle(.button).buttonStyle(.borderless).tint(.primary)
-                    .help(followPlayback ? "跟随播放已开启，点击暂停自动滚动" : "开启跟随播放")
-                    .accessibilityLabel("跟随播放")
-                    .accessibilityValue(followPlayback ? "已开启" : "已关闭")
-                Button { revealPlayback(proxy) } label: {
-                    Image(systemName: "location").frame(width: 28, height: 28)
-                }.buttonStyle(.borderless).foregroundStyle(.secondary)
-                    .help("定位正在回听的发言").accessibilityLabel("定位播放位置")
-                    .disabled(segments.isEmpty)
+            if page == .transcript {
+                HStack(spacing: 4) {
+                    Toggle(isOn: $followPlayback) {
+                        Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                            .frame(width: 28, height: 28)
+                            .background(followPlayback ? Color.primary.opacity(0.07) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                    }.toggleStyle(.button).buttonStyle(.borderless).tint(.primary)
+                        .help(followPlayback ? "跟随播放已开启，点击暂停自动滚动" : "开启跟随播放")
+                        .accessibilityLabel("跟随播放")
+                        .accessibilityValue(followPlayback ? "已开启" : "已关闭")
+                    Button { revealPlayback(proxy) } label: {
+                        Image(systemName: "location").frame(width: 28, height: 28)
+                    }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                        .help("定位正在回听的发言").accessibilityLabel("定位播放位置")
+                        .disabled(segments.isEmpty)
+                }
+                Divider().frame(height: 18)
             }
-            Divider().frame(height: 18)
             primaryTranscriptionAction
             exportMenu
             transcriptionMenu
