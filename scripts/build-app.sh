@@ -19,6 +19,20 @@ mv -f "$app_path/Contents/MacOS/.meeting.next" "$app_path/Contents/MacOS/meeting
 cp build/meeting-summary "$app_path/Contents/MacOS/.meeting-summary.next"
 mv -f "$app_path/Contents/MacOS/.meeting-summary.next" "$app_path/Contents/MacOS/meeting-summary"
 cp Resources/Info.plist "$app_path/Contents/Info.plist"
+if [[ -n "${MEETING_APP_VERSION:-}" ]]; then
+  if [[ ! "$MEETING_APP_VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
+    print -u2 'MEETING_APP_VERSION must use X.Y.Z format.'
+    exit 2
+  fi
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MEETING_APP_VERSION" "$app_path/Contents/Info.plist"
+fi
+if [[ -n "${MEETING_BUILD_NUMBER:-}" ]]; then
+  if [[ ! "$MEETING_BUILD_NUMBER" =~ '^[0-9]+$' ]]; then
+    print -u2 'MEETING_BUILD_NUMBER must be numeric.'
+    exit 2
+  fi
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $MEETING_BUILD_NUMBER" "$app_path/Contents/Info.plist"
+fi
 build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 build_commit="$(git rev-parse --short HEAD 2>/dev/null || print uncommitted)"
 /usr/libexec/PlistBuddy -c "Add :MIBuildTime string $build_time" "$app_path/Contents/Info.plist"

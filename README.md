@@ -34,11 +34,19 @@ Meeting history has separate transcript and summary tabs, each with its own scro
 
 The development environment has been verified with Swift 6.4.2 and Rust 1.100.0. The Rust package declares a minimum version of 1.85; compatibility of the locked dependencies with older toolchains needs separate verification.
 
+#### Download a release
+
+Download an architecture-specific ZIP from [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases): choose `arm64` for Apple Silicon or `x86_64` for Intel. Extract it and move `Meeting Intelligence.app` into Applications. Releases require macOS 26 or later and include the Rust summary backend and `meeting` CLI. The `.zip.sha256` file contains the archive checksum.
+
+Release builds use ad-hoc signing and are not notarized by Apple. macOS may ask you to explicitly approve opening the app in System Settings → Privacy & Security. Only approve builds from sources you trust.
+
 #### Build from source
 
-After obtaining the repository, run these commands from its root directory:
+Clone the repository and build the app:
 
 ```sh
+git clone https://github.com/wdtte/Meeting-Intelligence.git
+cd Meeting-Intelligence
 ./scripts/build-app.sh release
 open 'build/Meeting Intelligence.app'
 ```
@@ -247,6 +255,14 @@ Keep `README.md` at the repository root and all other project Markdown documents
 | [UI specification](docs/UI-SPEC.md) | Native macOS interface and interaction conventions |
 | [Development notes](docs/NOTES.md) | Feature notes and UI ideas |
 
+### Automated releases
+
+Every tag pushed to GitHub triggers `.github/workflows/release.yml`: run Swift and Rust tests, build separate Apple Silicon and Intel apps, then publish a GitHub Release with ZIPs, SHA-256 checksums, and generated release notes. Use `vX.Y.Z` version tags; `vX.Y.Z-rc.1` tags are marked as prereleases. Main-branch pushes and pull requests also validate both builds. See [AGENTS.md](AGENTS.md) for the release procedure and signing limitations.
+
+### License
+
+This project is licensed under the [MIT License](LICENSE). Third-party dependencies remain under their respective licenses.
+
 ## 简体中文
 
 一款面向 macOS 的原生会议录音与转写应用。录下系统声音和你的发言，在本机生成带时间戳的文字，点击字幕即可回听；需要时，再接入云端转写和 AI 会议摘要。
@@ -281,11 +297,19 @@ Keep `README.md` at the repository root and all other project Markdown documents
 
 当前开发环境验证使用 Swift 6.4.2 和 Rust 1.100.0。Rust 包声明的最低版本为 1.85，锁定依赖在更旧工具链上的兼容性需自行验证。
 
+#### 下载发布版本
+
+在 [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases) 下载对应架构的 ZIP：Apple Silicon 选择 `arm64`，Intel 选择 `x86_64`。解压后，将 `Meeting Intelligence.app` 移到“应用程序”。发布包要求 macOS 26 或更新版本，内含 Rust 摘要后端和 `meeting` CLI；`.zip.sha256` 文件提供压缩包校验值。
+
+发布包使用 ad-hoc 签名，未经 Apple 公证。macOS 可能要求你到“系统设置 → 隐私与安全性”中明确允许打开；请只允许运行来自可信来源的构建。
+
 #### 从源码构建
 
-获取仓库代码后，在仓库根目录运行：
+克隆仓库并构建应用：
 
 ```sh
+git clone https://github.com/wdtte/Meeting-Intelligence.git
+cd Meeting-Intelligence
 ./scripts/build-app.sh release
 open 'build/Meeting Intelligence.app'
 ```
@@ -478,6 +502,14 @@ cargo test --locked --manifest-path Helpers/summary/Cargo.toml
 常规测试使用合成音频、临时目录和模拟 HTTP，不录制真实会议，也不调用收费 API。真实设备录音和 Apple Speech 识别效果需在本机验证。
 
 欢迎通过 Issue 反馈问题或提出建议，也欢迎提交 Pull Request。涉及录音或转写的反馈，优先使用可公开的测试素材，并说明输入设备、转写语言及是否启用了云端服务。
+
+### 自动发布
+
+每次向 GitHub 推送 tag，都会触发 `.github/workflows/release.yml`：运行 Swift 和 Rust 测试，分别构建 Apple Silicon 与 Intel 应用，再创建 GitHub Release，上传 ZIP、SHA-256 校验文件及自动生成的更新日志。版本 tag 使用 `vX.Y.Z`；`vX.Y.Z-rc.1` 会标记为预发布。推送主分支或发起 Pull Request 也会验证两种架构的构建。发布步骤和签名限制见 [AGENTS.md](AGENTS.md)。
+
+### 开源协议
+
+本项目采用 [MIT 开源协议](LICENSE)。第三方依赖仍遵循各自的许可协议。
 
 ### 文档目录
 
