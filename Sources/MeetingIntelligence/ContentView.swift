@@ -4,6 +4,7 @@ import MeetingCore
 struct ContentView: View {
     @Bindable var model: AppModel
     @FocusState private var titleFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 22) {
@@ -86,19 +87,24 @@ struct ContentView: View {
                     .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                     .clipped()
 
-                    if !model.isBusy, model.page == .meetings, let recording = model.selectedRecording {
-                        MeetingPlaybackBar(playback: model.playback, recording: recording)
-                            .disabled(model.deletingRecordingID == recording.id)
+                    if model.showsPlaybackBar {
+                        MeetingPlaybackBar(playback: model.playback, recording: model.playbackRecording) {
+                            if let id = model.playback.recordingID { model.select(id) }
+                        }
+                            .disabled(model.deletingRecordingID != nil && model.deletingRecordingID == model.playback.recordingID)
                             .frame(maxWidth: 840)
                             .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 16)
                             .frame(maxWidth: .infinity)
                             .fixedSize(horizontal: false, vertical: true)
                             .layoutPriority(1)
-                            .transition(.identity)
-                            .transaction { $0.animation = nil; $0.disablesAnimations = true }
+                            .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                            .zIndex(1)
                     }
                 }
                 .frame(width: viewport.size.width, height: viewport.size.height)
+                .clipped()
+                .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.4, dampingFraction: 0.88),
+                           value: model.showsPlaybackBar)
             }
             .background(Color(nsColor: .textBackgroundColor))
         }
@@ -206,6 +212,19 @@ struct ContentView: View {
                     Label(recording.applicationName, systemImage: recording.bundleIdentifier.isEmpty ? "speaker.wave.2" : "app")
                     Label(AudioTimeline.clock(recording.duration), systemImage: "clock").fixedSize()
                 }.font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 12) {
+                    let playingThisRecord = model.playback.recordingID == recording.id && model.playback.isPlaying
+                    Button { model.toggleRecordingPlayback(recording.id) } label: {
+                        Label(playingThisRecord ? "暂停此记录" : "播放此记录",
+                              systemImage: playingThisRecord ? "pause.fill" : "play.fill")
+                    }.buttonStyle(.bordered).controlSize(.regular)
+                        .disabled(recording.duration <= 0 || model.deletingRecordingID != nil)
+                        .help("播放此记录；空格控制当前播放条的播放／暂停")
+                    if model.playback.recordingID == recording.id {
+                        Text(model.playback.isPlaying ? "正在播放" : "已暂停")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 if model.deletingRecordingID == recording.id {
                     ProgressView("正在停止转写并删除…").controlSize(.small)
                 }

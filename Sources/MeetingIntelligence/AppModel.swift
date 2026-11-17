@@ -59,7 +59,10 @@ final class AppModel {
         guard canManage(id), let source = recordingStores[id] else { return }
         deletingRecordingID = id
         defer { deletingRecordingID = nil }
-        if selectedID == id { playback.load(nil, store: nil) }
+        let wasPlaybackRecord = playback.recordingID == id
+        playback.tick()
+        let savedPosition = playback.position
+        if wasPlaybackRecord { playback.load(nil, store: nil) }
         await transcription.stopAndForget(id)
         do {
             try source.moveToTrash(id)
@@ -68,12 +71,14 @@ final class AppModel {
             exportedFiles.removeValue(forKey: id)
             if selectedID == id {
                 selectedID = recordings.first?.id
-                playback.load(selectedRecording, store: selectedID.flatMap { recordingStores[$0] })
             }
         } catch {
             if let recording = recordings.first(where: { $0.id == id }) {
                 transcription.load(recording)
-                if selectedID == id { playback.load(recording, store: source) }
+                if wasPlaybackRecord {
+                    playback.load(recording, store: source)
+                    playback.seek(to: savedPosition)
+                }
             }
             errorMessage = "删除失败：\(error.localizedDescription)"
         }
@@ -315,14 +320,35 @@ final class AppModel {
             transcription.submit(recording, store: source, retry: true)
         } catch { errorMessage = error.localizedDescription }
     }
-    func playSegment(_ segment: TranscriptSegment) {
+    private func preparePlayback(_ id: UUID) -> Bool {
+        guard !isBusy, deletingRecordingID == nil,
+              let recording = recordings.first(where: { $0.id == id }), recording.duration > 0,
+              let source = recordingStores[id] else { return false }
+        if playback.recordingID != id || playback.errorMessage != nil {
+            playback.load(recording, store: source)
+        }
+        return playback.errorMessage == nil && playback.duration > 0
+    }
+    func toggleRecordingPlayback(_ id: UUID) {
+        guard preparePlayback(id) else { return }
+        playback.toggle()
+    }
+    func playSegment(_ segment: TranscriptSegment, recordingID: UUID) {
+        guard preparePlayback(recordingID) else { return }
         playback.seek(to: segment.start)
         if !playback.isPlaying { playback.play() }
     }
+    private var canControlPlayback: Bool {
+        !isBusy && renamingRecordingID == nil && deletingRecordingID == nil &&
+        deletionCandidate == nil && errorMessage == nil && playback.duration > 0 && playback.errorMessage == nil
+    }
+    @discardableResult func togglePlayback() -> Bool {
+        guard canControlPlayback else { return false }
+        playback.toggle()
+        return true
+    }
     func navigateTranscript(_ direction: TranscriptNavigation.Direction) -> Bool {
-        guard page == .meetings, !isBusy, renamingRecordingID == nil,
-              deletingRecordingID == nil, deletionCandidate == nil, errorMessage == nil,
-              let id = selectedID, playback.duration > 0,
+        guard canControlPlayback, let id = playback.recordingID,
               let segments = transcription.documents[id]?.segments, !segments.isEmpty else { return false }
         playback.tick()
         if let target = TranscriptNavigation.destination(in: segments, from: playback.position, direction: direction) {
@@ -338,15 +364,19 @@ final class AppModel {
     @ObservationIgnored private var ticker: Task<Void, Never>?
     var isBusy: Bool { state != .idle }
     var selectedRecording: Recording? { recordings.first { $0.id == selectedID } }
+    var showsPlaybackBar: Bool { !isBusy && page == .meetings && selectedRecording != nil }
+    var playbackRecording: Recording? {
+        recordings.first { $0.id == playback.recordingID } ?? playback.recording
+    }
     var inputStatus: String {
         guard state == .recording else { return "等待开始" }
         if recoveringAudioDevice { return "音频设备已切换，正在恢复录音…" }
         guard let lastAudioAt else { return "等待系统音频 · 请播放会议或其他声音" }
         return ProcessInfo.processInfo.systemUptime - lastAudioAt > 4 ? "暂未检测到声音 · 请检查音源与权限" : "正在接收系统音频"
     }
-    init() {
+    init(settingsStore: StorageSettingsStore? = nil, startBackgroundServices: Bool = true) {
         do {
-            let settingsStore = try StorageSettingsStore.applicationStore()
+            let settingsStore = try settingsStore ?? StorageSettingsStore.applicationStore()
             self.settingsStore = settingsStore
             let settings = try settingsStore.load()
             storageSettings = settings
@@ -354,6 +384,7 @@ final class AppModel {
             try reload(recover: true)
         }
         catch { libraryError = error.localizedDescription }
+        guard startBackgroundServices else { return }
         refreshCredentialStatus()
         refreshSummaryCredentialStatus()
         Task { [weak self] in await self?.prepareSpeechModel() }
@@ -402,13 +433,12 @@ final class AppModel {
         page = .meetings
         selectedID = id
         if id == nil { useCloudTranscription = false }
-        playback.load(selectedRecording, store: id.flatMap { recordingStores[$0] })
     }
     func start() async {
         guard state == .idle, deletingRecordingID == nil else { return }
         guard let store, libraryError == nil else { return }
         page = .meetings
-        state = .preparing; playback.stop(); errorMessage = nil
+        state = .preparing; playback.pause(); errorMessage = nil
         var recording = Recording.systemAudio(title: "会议录音 · \(Date().formatted(date: .abbreviated, time: .shortened))")
         if let settings = storageSettings {
             recording.transcriptPath = settings.transcriptDirectory.appendingPathComponent("\(recording.id).json").path
@@ -467,7 +497,6 @@ final class AppModel {
             state = .idle; activeRecordingID = nil; useCloudTranscription = false
             do { try reload() } catch { libraryError = error.localizedDescription }
             selectedID = recording.id
-            playback.load(recording, store: recordingStores[recording.id] ?? store)
         case .failure(let message):
             recoveringAudioDevice = false
             state = .idle; activeRecordingID = nil; errorMessage = message
@@ -477,7 +506,6 @@ final class AppModel {
     func showSettings() {
         guard !isBusy, deletingRecordingID == nil else { return }
         commitRename()
-        playback.pause()
         selectedID = nil
         page = .settings
     }
