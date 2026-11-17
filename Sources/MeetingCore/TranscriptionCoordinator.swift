@@ -178,51 +178,33 @@ public final class TranscriptionCoordinator {
                 let provider = try self.cloudFactory(cloud.configuration)
                 diagnosticContext["stage"] = "provider_prepare"
                 _ = try await provider.prepare(locale: document.locale)
-                for chunk in recording.chunks.filter(\.isComplete).sorted(by: { $0.offset < $1.offset }) {
-                    try Task.checkCancellation()
-                    let jobKey = chunk.id.uuidString
-                    if self.documents[recording.id]?.cloud?.jobs[jobKey]?.completed == true { continue }
-                    diagnosticContext["chunk_id"] = jobKey
-                    diagnosticContext["source"] = chunk.audioSource.rawValue
-                    diagnosticContext["stage"] = "audio_prepare"
-                    DiagnosticLog.shared.record("cloud.audio.begin", fields: diagnosticContext)
-                    let original = try store.audioURL(recording: recording.id, fileName: chunk.fileName)
-                    let saved = self.documents[recording.id]?.cloud?.jobs[jobKey]?.checkpoint
-                    // A submitted job only needs polling; never upload its audio a second time.
-                    let prepared = saved == nil || saved?.phase == .rejected
-                        ? try await CloudAudioPreparation.prepare(url: original, skipSilence: cloud.configuration.skipSilence)
-                        : PreparedCloudAudio(url: original)
-                    defer {
-                        if let temporary = prepared.url, temporary != original { try? FileManager.default.removeItem(at: temporary) }
+                let locale = document.locale
+                var chunks = recording.chunks.filter {
+                    $0.isComplete && self.documents[recording.id]?.cloud?.jobs[$0.id.uuidString]?.completed != true
+                }.sorted(by: { $0.offset < $1.offset }).makeIterator()
+                // Keep a small rolling window instead of waiting for each remote task in sequence.
+                // On failure, stop launching work and drain accepted jobs so their results survive retry.
+                try await withThrowingTaskGroup(of: Result<Void, Error>.self) { group in
+                    func enqueue(_ chunk: AudioChunk) {
+                        group.addTask {
+                            do {
+                                try await self.transcribeCloudChunk(chunk, recording: recording, store: store,
+                                    provider: provider, locale: locale, configuration: cloud.configuration, url: url)
+                                return .success(())
+                            } catch { return .failure(error) }
+                        }
                     }
-                    var job = self.documents[recording.id]?.cloud?.jobs[jobKey] ?? CloudChunkJob()
-                    job.audioDuration = chunk.duration
-                    diagnosticContext["stage"] = "save_progress"
-                    try self.updateCloud(recording.id, url: url) { $0.jobs[jobKey] = job }
-                    let result: ProviderTranscription
-                    diagnosticContext["stage"] = "transcribe"
-                    if let audioURL = prepared.url {
-                        result = try await provider.transcribe(TranscriptionRequest(audioURL: audioURL, chunk: chunk,
-                            locale: document.locale, checkpoint: saved, recordingID: recording.id)) { [weak self] checkpoint in
-                                try await self?.saveCheckpoint(checkpoint, recordingID: recording.id, jobKey: jobKey, url: url)
-                            }
-                    } else {
-                        DiagnosticLog.shared.record("cloud.audio.silence_skipped", fields: diagnosticContext)
-                        result = ProviderTranscription(segments: [])
+                    for _ in 0..<3 {
+                        if let chunk = chunks.next() { enqueue(chunk) }
+                    }
+                    var firstError: Error?
+                    while let result = try await group.next() {
+                        if case .failure(let error) = result, firstError == nil { firstError = error }
+                        if Task.isCancelled { group.cancelAll() }
+                        if firstError == nil, !Task.isCancelled, let chunk = chunks.next() { enqueue(chunk) }
                     }
                     try Task.checkCancellation()
-                    diagnosticContext["stage"] = "save_result"
-                    // Read the latest document: checkpoint writes may have changed it while awaiting.
-                    guard var latest = self.documents[recording.id] else { throw CancellationError() }
-                    // No words is a terminal result for this chunk, not a failed meeting.
-                    // Keep any local fallback rather than replacing it with an empty result.
-                    if !result.noSpeechRecognized { try latest.commit(result.segments, for: chunk) }
-                    latest.cloud?.jobs[jobKey]?.completed = true
-                    latest.cloud?.jobs[jobKey]?.noSpeechRecognized = result.noSpeechRecognized
-                    latest.cloud?.jobs[jobKey]?.skippedSilence = prepared.isSilent
-                    latest.cloud?.jobs[jobKey]?.usage = result.usage
-                    latest.engine = "Apple + \(provider.engine)"
-                    try latest.save(to: url); self.documents[recording.id] = latest
+                    if let firstError { throw firstError }
                 }
                 diagnosticContext["stage"] = "save_completed"
                 try self.updateCloud(recording.id, url: url) { $0.status = "completed"; $0.error = nil }
@@ -241,6 +223,62 @@ public final class TranscriptionCoordinator {
             }
         }
     }
+    // Network waits overlap; all checkpoint/result mutations remain serialized on the main actor.
+    private func transcribeCloudChunk(_ chunk: AudioChunk, recording: Recording, store: RecordingStore,
+                                     provider: any TranscriptionProvider, locale: String,
+                                     configuration: CloudTranscriptionConfiguration, url: URL) async throws {
+        var diagnosticContext = ["recording_id": recording.id.uuidString]
+        do {
+            try Task.checkCancellation()
+            let jobKey = chunk.id.uuidString
+            diagnosticContext["chunk_id"] = jobKey
+            diagnosticContext["source"] = chunk.audioSource.rawValue
+            diagnosticContext["stage"] = "audio_prepare"
+            DiagnosticLog.shared.record("cloud.audio.begin", fields: diagnosticContext)
+            let original = try store.audioURL(recording: recording.id, fileName: chunk.fileName)
+            let saved = self.documents[recording.id]?.cloud?.jobs[jobKey]?.checkpoint
+            // A submitted job only needs polling; never upload its audio a second time.
+            let prepared = saved == nil || saved?.phase == .rejected
+                ? try await CloudAudioPreparation.prepare(url: original, skipSilence: configuration.skipSilence)
+                : PreparedCloudAudio(url: original)
+            defer {
+                if let temporary = prepared.url, temporary != original { try? FileManager.default.removeItem(at: temporary) }
+            }
+            try Task.checkCancellation()
+            var job = self.documents[recording.id]?.cloud?.jobs[jobKey] ?? CloudChunkJob()
+            job.audioDuration = chunk.duration
+            diagnosticContext["stage"] = "save_progress"
+            try self.updateCloud(recording.id, url: url) { $0.jobs[jobKey] = job }
+            let result: ProviderTranscription
+            diagnosticContext["stage"] = "transcribe"
+            if let audioURL = prepared.url {
+                result = try await provider.transcribe(TranscriptionRequest(audioURL: audioURL, chunk: chunk,
+                    locale: locale, checkpoint: saved, recordingID: recording.id)) { [weak self] checkpoint in
+                        try await self?.saveCheckpoint(checkpoint, recordingID: recording.id, jobKey: jobKey, url: url)
+                    }
+            } else {
+                DiagnosticLog.shared.record("cloud.audio.silence_skipped", fields: diagnosticContext)
+                result = ProviderTranscription(segments: [])
+            }
+            try Task.checkCancellation()
+            diagnosticContext["stage"] = "save_result"
+            // Read the latest document: checkpoint writes may have changed it while awaiting.
+            guard var latest = self.documents[recording.id] else { throw CancellationError() }
+            // No words is a terminal result for this chunk, not a failed meeting.
+            // Keep any local fallback rather than replacing it with an empty result.
+            if !result.noSpeechRecognized { try latest.commit(result.segments, for: chunk) }
+            latest.cloud?.jobs[jobKey]?.completed = true
+            latest.cloud?.jobs[jobKey]?.noSpeechRecognized = result.noSpeechRecognized
+            latest.cloud?.jobs[jobKey]?.skippedSilence = prepared.isSilent
+            latest.cloud?.jobs[jobKey]?.usage = result.usage
+            latest.engine = "Apple + \(provider.engine)"
+            try latest.save(to: url); self.documents[recording.id] = latest
+        } catch {
+            DiagnosticLog.shared.failure("cloud.chunk.processing_failed", error: error, fields: diagnosticContext)
+            throw error
+        }
+    }
+
     private func finishTranscription(_ recording: Recording, store: RecordingStore, retry: Bool) {
         startCloud(recording, store: store, retry: retry)
         if !cloudRunning.contains(recording.id), !paused.contains(recording.id) { startSummary(recording) }
