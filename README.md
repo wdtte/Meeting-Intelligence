@@ -55,6 +55,8 @@ The script builds the Swift app and Rust summary backend into an `.app` for your
 
 Launch the `.app` so macOS can associate recording permissions with the application. The script automatically uses an Apple Development or Distribution signing identity when exactly one is available; otherwise, it uses ad-hoc signing. Set `MEETING_CODESIGN_IDENTITY` to choose an identity explicitly. Build artifacts are not notarized by Apple.
 
+For release packaging, install Node.js 24, run `npm ci --prefix scripts/dmg`, then `./scripts/package-release.sh`. The DMG includes a Retina installation background and custom volume icon; see [DMG design](docs/DMG-DESIGN.md).
+
 #### Record your first meeting
 
 1. Open the app and select New Recording (“新录制”). System audio capture includes all apps by default; no meeting app selection is required.
@@ -317,6 +319,8 @@ open 'build/Meeting Intelligence.app'
 构建脚本会编译 Swift 应用和 Rust 摘要后端，生成适配当前 Mac 架构的 `.app`。运行生成的应用无需再安装 Rust、Node.js 或 Bun。
 
 请通过 `.app` 启动，以便 macOS 正确识别录音权限。脚本会自动使用唯一可用的 Apple 开发或分发签名证书；没有唯一可用证书时使用 ad-hoc 签名。也可通过 `MEETING_CODESIGN_IDENTITY` 指定签名身份。构建产物未经过 Apple 公证。
+
+如需打包发布版本，安装 Node.js 24，运行 `npm ci --prefix scripts/dmg`，再执行 `./scripts/package-release.sh`。DMG 包含 Retina 安装背景和专属磁盘图标，详见 [DMG 设计说明](docs/DMG-DESIGN.md)。
 
 #### 录制第一场会议
 

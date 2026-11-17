@@ -7,6 +7,11 @@ if [[ ! -d "$app_path" ]]; then
   exit 1
 fi
 codesign --verify --strict "$app_path"
+app_path="${app_path:A}"
+if ! command -v node >/dev/null || [[ ! -d scripts/dmg/node_modules/appdmg ]]; then
+  print -u2 'Packaging requires Node.js 24 and npm ci --prefix scripts/dmg.'
+  exit 1
+fi
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
 if [[ ! "$version" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
   print -u2 'Expected an app version in X.Y.Z format.'
@@ -27,10 +32,12 @@ trap 'rm -rf "$staging"' EXIT
 ditto "$app_path" "$staging/Meeting Intelligence.app"
 cp LICENSE README.md "$staging/"
 ditto -c -k --sequesterRsrc "$staging" "$output_dir/$archive"
-ln -s /Applications "$staging/Applications"
-hdiutil create -volname 'Meeting Intelligence' -srcfolder "$staging" \
-  -format UDZO -fs HFS+ -ov "$output_dir/$disk_image"
+mkdir "$staging/.Documentation"
+cp LICENSE README.md "$staging/.Documentation/"
+node scripts/dmg/create-installer.mjs "$staging/Meeting Intelligence.app" \
+  "$output_dir/$disk_image" "$staging/.Documentation"
 hdiutil verify "$output_dir/$disk_image"
+python3 scripts/verify-dmg.py "$output_dir/$disk_image" "$version" "$arch"
 (cd "$output_dir" && \
   shasum -a 256 "$archive" > "$archive.sha256" && \
   shasum -a 256 "$disk_image" > "$disk_image.sha256")

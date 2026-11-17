@@ -72,6 +72,16 @@ jobs:
           MEETING_CODESIGN_IDENTITY: '-'
         run: ./scripts/build-app.sh release
 
+      - name: Set up Node for DMG packaging
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: scripts/dmg/package-lock.json
+
+      - name: Install DMG packaging dependencies
+        run: npm ci --prefix scripts/dmg --no-audit --no-fund
+
       - name: Package app
         run: ./scripts/package-release.sh
 
