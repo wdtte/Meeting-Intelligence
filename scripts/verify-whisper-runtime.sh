@@ -4,7 +4,7 @@ app_path="${1:?Usage: verify-whisper-runtime.sh /path/to/Meeting Intelligence.ap
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/meeting-whisper-smoke.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 "$app_path/Contents/MacOS/meeting" --help > "$scratch/help.txt"
-rg -q 'macOS 15.0' "$scratch/help.txt"
+/usr/bin/grep -Fq 'macOS 15.0' "$scratch/help.txt"
 # System speech synthesis only; never record a microphone or open user data.
 say -r 160 -o "$scratch/speech.aiff" 'The meeting starts at nine. We will discuss the project plan tomorrow.'
 afconvert -f WAVE -d LEI16@16000 -c 1 "$scratch/speech.aiff" "$scratch/speech.wav"
