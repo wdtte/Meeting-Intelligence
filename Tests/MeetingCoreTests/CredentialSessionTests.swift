@@ -4,6 +4,12 @@ import Testing
 import Security
 @testable import MeetingCore
 
+private final class CredentialReadCounter: Sendable {
+    private let value = Mutex(0)
+    func increment() { value.withLock { $0 += 1 } }
+    var count: Int { value.withLock { $0 } }
+}
+
 @Test func credentialReadsRequireExplicitOptInToSystemPrompts() {
     for region in [QwenRegion.beijing, .singapore] {
         let silent = TranscriptionCredentials.readQuery(region: region)
@@ -17,19 +23,19 @@ import Security
 
 @Test func credentialSessionReusesAuthorizationAndSeparatesAccounts() async {
     let cache = CredentialSessionCache()
-    let reads = Mutex(0)
+    let reads = CredentialReadCounter()
     await withTaskGroup(of: String?.self) { group in
         for _ in 0..<20 {
             group.addTask {
                 cache.load("beijing") {
-                    reads.withLock { $0 += 1 }
+                    reads.increment()
                     return "test-only-key"
                 }
             }
         }
         for await value in group { #expect(value == "test-only-key") }
     }
-    #expect(reads.withLock { $0 } == 1)
+    #expect(reads.count == 1)
     #expect(cache.load("singapore") { "other-test-key" } == "other-test-key")
 }
 
