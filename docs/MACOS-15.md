@@ -1,6 +1,6 @@
 # macOS 15 compatibility edition
 
-Two build editions share the same application identity, storage locations, schema version 1, cloud transcription, summaries, and read-only CLI. This branch introduces compatibility packages; existing published releases do not gain macOS 15 support automatically.
+Two build editions share the same application identity, storage locations, schema version 1, cloud transcription, summaries, and read-only CLI. Compatibility support requires a compatibility package; existing published releases do not gain macOS 15 support automatically.
 
 | Edition | Minimum system | Local engine | Bundled model |
 | --- | --- | --- | --- |
@@ -8,6 +8,8 @@ Two build editions share the same application identity, storage locations, schem
 | `compatibility` | macOS 15 | whisper.cpp 1.8.2, multilingual Whisper base q5_1 | 59,707,625 bytes, included for offline use |
 
 Use the standard edition on macOS 26+. The compatibility edition always uses Whisper, including when launched on a newer system. Chinese and English are supported initially. Recognition runs sequentially on a background queue, using CPU/Accelerate with at most four threads; recordings continue independently if recognition is slower than real time. The engine reloads the model for each closed audio chunk. This bounds integration complexity but adds startup overhead; benchmark long meetings on older Intel hardware before promising live transcription throughput.
+
+Both editions use ad-hoc signing in releases and are not notarized by Apple. If macOS blocks the first launch, dismiss the warning with **Done**, then open **System Settings → Privacy & Security → Security → Open Anyway** and authenticate and confirm when prompted. See the README's [English installation steps](../README.md#download-a-release) or [简体中文安装步骤](../README.md#下载发布版本) for the full procedure, including what to do if the button is missing.
 
 ## Build and package
 

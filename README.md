@@ -38,7 +38,14 @@ The development environment has been verified with Swift 6.4.2 and Rust 1.100.0.
 
 Download an architecture-specific DMG from [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases): choose `arm64` for Apple Silicon or `x86_64` for Intel. Open the DMG, drag `Meeting Intelligence.app` onto the Applications shortcut, then eject the disk image. A ZIP archive is also available. Standard packages require macOS 26+ and contain no Whisper model. Compatibility packages, when available, end in `-macos15-whisper` and support macOS 15+ with a bundled Whisper model. Both include the Rust summary backend and `meeting` CLI. Each download has a matching `.sha256` checksum file.
 
-Release builds use ad-hoc signing and are not notarized by Apple. macOS may ask you to explicitly approve opening the app in System Settings → Privacy & Security. Only approve builds from sources you trust.
+Release builds use ad-hoc signing and are not notarized by Apple. Only approve builds from sources you trust. If macOS says “Apple could not verify” the app or “Meeting Intelligence Not Opened”, follow these steps for either edition:
+
+1. Click **Done** to dismiss the warning, keeping the app in Applications.
+2. Open **Apple menu → System Settings → Privacy & Security**, then scroll down to the **Security** section.
+3. Find the message about Meeting Intelligence being blocked and click **Open Anyway**. Authenticate with Touch ID or your Mac login password if prompted.
+4. Confirm **Open Anyway** (or **Open**, depending on the macOS version) in the next dialog to launch the app.
+
+The **Open Anyway** button is available for about an hour after a blocked launch attempt. If it is missing, try opening the app from Applications again, then return to Privacy & Security. On a managed Mac, an administrator's policy may prevent this approval.
 
 #### Build from source
 
@@ -305,7 +312,14 @@ This project is licensed under the [MIT License](LICENSE). Third-party dependenc
 
 在 [GitHub Releases](https://github.com/wdtte/Meeting-Intelligence/releases) 下载对应架构的 DMG：Apple Silicon 选择 `arm64`，Intel 选择 `x86_64`。打开 DMG，将 `Meeting Intelligence.app` 拖到“应用程序”快捷方式，然后推出磁盘映像。也提供 ZIP 压缩包。标准版要求 macOS 26+，不含 Whisper 模型；带 `-macos15-whisper` 后缀的兼容版（发布后可选）支持 macOS 15+，随包提供 Whisper 模型。两版均内含 Rust 摘要后端和 `meeting` CLI；每个下载文件都附带对应的 `.sha256` 校验文件。
 
-发布包使用 ad-hoc 签名，未经 Apple 公证。macOS 可能要求你到“系统设置 → 隐私与安全性”中明确允许打开；请只允许运行来自可信来源的构建。
+发布包使用 ad-hoc 签名，未经 Apple 公证。请只允许运行来自可信来源的构建。如果 macOS 提示“Apple 无法验证”或“未打开 Meeting Intelligence”，标准版和兼容版都可按以下步骤操作：
+
+1. 点击 **“完成”（Done）** 关闭警告，将应用保留在“应用程序”中。
+2. 打开 **Apple 菜单 → 系统设置（System Settings）→ 隐私与安全性（Privacy & Security）**，向下滚动到 **“安全性”（Security）** 区域。
+3. 找到 Meeting Intelligence 被阻止的提示，点击 **“仍要打开”（Open Anyway）**。如有要求，使用 Touch ID 或 Mac 登录密码确认。
+4. 在接下来的对话框中再次点击 **“仍要打开”（Open Anyway）** 或 **“打开”（Open）**（取决于 macOS 版本），启动应用。
+
+**“仍要打开”** 按钮通常在启动被阻止后约一小时内可用。如果没有看到，请先在“应用程序”中再次尝试打开应用，再回到“隐私与安全性”。受管理的 Mac 可能因管理员策略而无法批准打开。
 
 #### 从源码构建
 
