@@ -58,6 +58,8 @@ jobs:
 
       - name: Set up toolchain and cache
         uses: ./.github/actions/setup-build
+        with:
+          cache-profile: release
 
       - name: Test Swift
         run: ./scripts/test.sh
