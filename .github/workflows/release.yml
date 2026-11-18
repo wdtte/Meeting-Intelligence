@@ -184,6 +184,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out release notes
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Download release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -204,6 +208,10 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" ./*.dmg ./*.zip ./*.sha256 --clobber
           args=(--draft=false)
+          if [[ "$RELEASE_TAG" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)([-+][0-9A-Za-z.-]+)?$ ]]; then
+            notes="../docs/RELEASE-${BASH_REMATCH[1]}.md"
+            if [[ -f "$notes" ]]; then args+=(--notes-file "$notes"); fi
+          fi
           if [[ "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+- ]]; then
             args+=(--prerelease)
           fi
