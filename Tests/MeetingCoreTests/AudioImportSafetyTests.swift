@@ -417,3 +417,14 @@ private actor PartialSessionProviderFixture: TranscriptionProvider {
     let saved = try JSONSerialization.jsonObject(with: Data(contentsOf: store.settingsURL)) as! [String: Any]
     #expect((saved["futurePreference"] as? [String: Bool])?["keep"] == true)
 }
+
+@Test func completedSessionsWithoutTokenUsageRemainVisible() throws {
+    var (document, session, _) = sessionFixture()
+    var recording = Recording.systemAudio(title: "unknown usage"); recording.id = document.recordingID
+    session.status = "completed"; session.usage = nil
+    document.cloud?.sessions = [session]
+    let totals = APIUsageReport(recordings: [recording], documents: [recording.id: document], days: nil).transcription
+    #expect(totals.resultCount == 1)
+    #expect(totals.incompleteResultCount == 1)
+    #expect(totals.inputTokens == nil && totals.outputTokens == nil)
+}

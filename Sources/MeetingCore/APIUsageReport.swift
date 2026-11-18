@@ -83,7 +83,7 @@ public struct APIUsageReport: Sendable {
             }
             if let cloud = document.cloud {
                 let sessions = (cloud.sessions ?? []) + (cloud.history ?? []).flatMap(\.sessions)
-                for session in sessions where session.status == "completed" && session.usage != nil {
+                for session in sessions where session.status == "completed" {
                     samples.append(Sample(recording: recording, date: session.usage?.recordedAt ?? recording.startedAt,
                         usage: session.usage, identity: APIUsageIdentity(modelName: session.usage?.modelName ?? session.model, keyID: session.usage?.keyID), isSummary: false))
                 }

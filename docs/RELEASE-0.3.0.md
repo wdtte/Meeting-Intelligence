@@ -18,7 +18,7 @@ Older apps reject v2. Installing an older app alone does not downgrade data. Set
 
 All checks use synthetic audio, temporary libraries and mocked HTTP; no real meetings or paid provider requests.
 
-- Swift suites: standard 144 tests (5 app + 118 core + 21 CLI), compatibility 153 tests (5 app + 127 core + 21 CLI); Rust 15 tests. Coverage includes: import formats/invalid inputs/cancellation, phase-safe conversion, initial silence/gaps/same-source overlaps, task-scoped identities, cross-chunk sentences, legacy summary fingerprints, manual attribution, schema/export completeness and usage.
+- Swift suites: standard 145 tests (5 app + 119 core + 21 CLI), compatibility 154 tests (5 app + 128 core + 21 CLI); Rust 15 tests. Coverage includes: import formats/invalid inputs/cancellation, phase-safe conversion, initial silence/gaps/same-source overlaps, task-scoped identities, cross-chunk sentences, legacy summary fingerprints, manual attribution, schema/export completeness and usage.
 - Durable migration and restore: exact original bytes, both replacement boundaries interrupted by an injected disk-write failure, repeated recovery, future/corrupt isolation, conflict protection, bad backup rejection and exclusive app writer lease.
 - Mock Qwen requests verify diarization fields and 181 running polls beyond the former 180-poll budget. Reopening completed imports does not upload again. Provider contract details: [QWEN-FILETRANS-CONTRACT.md](QWEN-FILETRANS-CONTRACT.md).
 - Local release builds verify ad-hoc signatures, deployment targets, resources and model isolation for both editions. Packaging checks mount DMGs read-only and validate app contents and checksums.
