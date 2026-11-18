@@ -84,13 +84,13 @@ enum TranscriptHTMLWriter {
         let date = DateFormatter()
         date.locale = Locale(identifier: "zh_CN")
         date.dateFormat = "yyyy年M月d日 HH:mm zzz"
-        let completed = transcript.status == "completed" && (transcript.cloud == nil || transcript.cloud?.status == "completed")
+        let completed = MeetingReadSnapshot(recording: recording, transcript: transcript, transcriptURL: destination, revision: "export").contentState == "complete"
         let values = [
             "NONCE": nonce,
             "APP_ICON": icon,
             "TITLE": escape(recording.title),
             "APPLICATION": escape(recording.applicationName),
-            "DATE": escape(date.string(from: recording.startedAt)),
+            "DATE": escape((recording.origin == .imported ? "导入于 " : "") + date.string(from: recording.startedAt)),
             "DURATION": AudioTimeline.clock(recording.duration),
             "COUNT": String(transcript.segments.count),
             "NOTICE": completed ? "" : "转写尚未全部完成 · 本文件仅包含导出时已有的内容",
@@ -157,7 +157,7 @@ enum TranscriptHTMLWriter {
                     try write("</section>")
                 }
             case "SEGMENTS":
-                let ordered = transcript.segments.enumerated().sorted {
+                let ordered = transcript.resolvedSegments.enumerated().sorted {
                     $0.element.start == $1.element.start ? $0.offset < $1.offset : $0.element.start < $1.element.start
                 }
                 for (index, segment) in ordered {
@@ -173,6 +173,7 @@ enum TranscriptHTMLWriter {
                         \(timestamp)
                         <div class="segment-labels">
                           <span class="source label"><svg class="icon" aria-hidden="true"><use href="#\(icon)"/></svg>\(segment.source.label)</span>
+                          <span class="speaker">\(escape(transcript.speakerName(for: segment)))</span>
                           <span class="engine">\(engine)</span>
                         </div>
                       </div>

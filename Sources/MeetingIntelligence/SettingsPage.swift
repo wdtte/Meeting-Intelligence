@@ -13,6 +13,13 @@ struct SettingsPage: View {
                 APIUsageDashboard(model: model).padding(28).settingsCard()
                 VStack(alignment: .leading, spacing: 24) {
                     Label("数据存储", systemImage: "internaldrive").font(.headline)
+                    HStack {
+                        Button("打开迁移备份") { model.revealBackups() }
+                        Button("恢复元数据备份…") { model.restoreMetadataBackup() }
+                            .disabled(!model.transcription.running.isEmpty || !model.transcription.summaryRunning.isEmpty)
+                    }
+                    Text("首次使用 v2 功能前备份原始元数据；备份不含音频。恢复会检测备份后的编辑冲突，不会覆盖新数据。降级需使用相应备份。")
+                        .font(.caption).foregroundStyle(.secondary)
                     directoryRow("录音保存目录", icon: "waveform", url: model.storageSettings?.audioDirectory, kind: .audio)
                     Divider()
                     directoryRow("Transcript 数据保存目录", icon: "text.alignleft", url: model.storageSettings?.transcriptDirectory, kind: .transcript)
@@ -26,9 +33,9 @@ struct SettingsPage: View {
                     MicrophoneControls(model: model)
                     Label("建议佩戴耳机，以获得最佳录音与转写质量，减少扬声器声音被麦克风重复收录。", systemImage: "headphones")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("转写角色固定为系统音频与麦克风，按采集来源区分。")
+                    Text("本地字幕按采集来源区分；云端可识别任务内发言人，支持导入音频。")
                         .font(.caption).foregroundStyle(.secondary)
-                    Label("本地转写始终开启", systemImage: "checkmark.circle")
+                    Label("应用录音始终本地转写；导入直接云端转写", systemImage: "checkmark.circle")
                         .font(.callout).foregroundStyle(.secondary)
                     SpeechModelControls(model: model)
                 }.padding(28).settingsCard()
@@ -67,7 +74,8 @@ struct SettingsPage: View {
                         Button("授权钥匙串访问…") { model.authorizeAPIKey() }.disabled(!model.apiKeySaved)
                         Text("日常转写不会弹出密码框。首次授权请选择系统提示中的“始终允许”，以记住对本应用的访问许可；钥匙串锁定时仍需解锁。")
                             .font(.caption).foregroundStyle(.secondary)
-                        Toggle("跳过整段静音，减少云端用量", isOn: $model.skipCloudSilence)
+                        Toggle("新任务默认区分发言人（最多 120 分钟）", isOn: $model.diarizationEnabled)
+                        Toggle("分片精校时跳过整段静音，减少云端用量", isOn: $model.skipCloudSilence)
                         Text("只跳过整段接近零音量的片段；轻声、背景噪声及片段内的停顿仍会上传。原录音和回听时间轴保持完整。双轨按各自上传的音频分别计量。")
                             .font(.caption).foregroundStyle(.secondary)
                         Text("启用后会将音频片段上传至所选地域的百炼临时存储，并使用 Qwen-Audio 3.1 异步转写。API Key 仅保存在系统钥匙串。费用按百炼实际用量结算。")

@@ -687,3 +687,29 @@ private struct ConcurrentCloudFixture {
     }
     #expect(coordinator.documents[recording.id]?.cloud?.status == "completed")
 }
+
+@Test func sessionDiarizationSubmitsMonoFlagAndSurvivesOldPollingWindow() async throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("SessionHTTP-\(UUID()).wav")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try writeCloudFixture(url, values: [0.01])
+    let configuration = CloudTranscriptionConfiguration(region: .singapore, workspaceID: "workspace-test", diarizationEnabled: true, strategy: .sourceSessions)
+    var chunk = fixtureChunk(source: .imported, offset: 0)
+    chunk.duration = 1
+    let session = CloudTranscriptionSession(runID: UUID(), source: .imported, chunks: [chunk], fingerprint: "fixture", configuration: configuration)
+    var replies = [ScriptedHTTP.Reply(body: uploadPolicy), .init(), .init(body: #"{"output":{"task_id":"speaker-task","task_status":"PENDING"}}"#)]
+    replies += (0..<181).map { _ in .init(body: #"{"output":{"task_status":"RUNNING"}}"#) }
+    replies += [.init(body: #"{"output":{"task_status":"SUCCEEDED","results":[{"subtask_status":"SUCCEEDED","transcription_url":"https://result.oss-cn-beijing.aliyuncs.com/result.json"}]}}"#), .init(body: #"{"transcripts":[{"channel_id":0,"text":"speaker fixture","sentences":[{"begin_time":100,"end_time":600,"text":"speaker fixture","speaker_id":0}]}]}"#)]
+    let http = ScriptedHTTP(replies)
+    let provider = QwenTranscriptionProvider(configuration: configuration, apiKey: "test-key", transport: http, pollWait: { _ in })
+    let checkpoints = Checkpoints()
+    let result = try await provider.transcribe(.init(audioURL: url, session: session, locale: "en-US", recordingID: UUID())) { await checkpoints.add($0) }
+    #expect(result.segments[0].start == 0.1)
+    #expect(result.segments[0].chunkID == nil)
+    #expect(result.segments[0].providerSpeakerID == "0")
+    let requests = await http.requests
+    let body = try JSONSerialization.jsonObject(with: requests[2].httpBody!) as! [String: Any]
+    #expect((body["parameters"] as? [String: Any])?["diarization_enabled"] as? Bool == true)
+    #expect(requests[2].url?.host == "workspace-test.ap-southeast-1.maas.aliyuncs.com")
+    #expect(requests.filter { $0.httpMethod == "POST" }.count == 2)
+    #expect(await checkpoints.values.filter { $0.phase == .submitting }.count == 1)
+}

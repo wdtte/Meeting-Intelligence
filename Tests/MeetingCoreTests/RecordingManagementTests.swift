@@ -54,7 +54,7 @@ private func managedFixture() throws -> (RecordingStore, Recording, URL) {
     }
     #expect(try Data(contentsOf: url) == original)
     #expect(try store.loadAll() == [recording])
-    try TranscriptDocument(recordingID: UUID(), locale: "zh-CN").save(to: url)
+    try JSONEncoder().encode(TranscriptDocument(recordingID: UUID(), locale: "zh-CN")).write(to: url, options: .atomic)
     var called = false
     #expect(throws: MeetingError.self) { try store.moveToTrash(recording.id) { _ in called = true } }
     #expect(!called)
@@ -65,7 +65,7 @@ private func managedFixture() throws -> (RecordingStore, Recording, URL) {
     let (store, original, root) = try managedFixture()
     defer { try? FileManager.default.removeItem(at: root) }
     var recording = original
-    for (index, source) in AudioSource.allCases.enumerated() {
+    for (index, source) in [AudioSource.application, .microphone].enumerated() {
         let rate = index == 0 ? 8000.0 : 16000.0
         let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: UInt32(rate))!

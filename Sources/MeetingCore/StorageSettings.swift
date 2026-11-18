@@ -7,6 +7,16 @@ public struct StorageSettings: Codable, Equatable, Sendable {
     public var transcriptDirectory: URL
     public var audioHistoryDirectories: [URL]
 
+    public init(audioDirectory: URL, transcriptDirectory: URL, audioHistoryDirectories: [URL]) {
+        self.audioDirectory = audioDirectory; self.transcriptDirectory = transcriptDirectory; self.audioHistoryDirectories = audioHistoryDirectories
+    }
+    enum CodingKeys: String, CodingKey { case audioDirectory, transcriptDirectory, audioHistoryDirectories }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        audioDirectory = try values.decode(URL.self, forKey: .audioDirectory)
+        transcriptDirectory = try values.decode(URL.self, forKey: .transcriptDirectory)
+        audioHistoryDirectories = try values.decodeIfPresent([URL].self, forKey: .audioHistoryDirectories) ?? [audioDirectory]
+    }
     public static func defaults(base: URL) -> StorageSettings {
         let audio = base.appendingPathComponent("Recordings", isDirectory: true)
         return StorageSettings(audioDirectory: audio,
@@ -41,14 +51,23 @@ public struct StorageSettingsStore: Sendable {
     }
     public func load() throws -> StorageSettings {
         guard FileManager.default.fileExists(atPath: settingsURL.path) else { return .defaults(base: base) }
-        let settings = try JSONDecoder().decode(StorageSettings.self, from: Data(contentsOf: settingsURL))
+        let bytes = try Data(contentsOf: settingsURL)
+        try Self.checkVersion(bytes)
+        let settings = try JSONDecoder().decode(StorageSettings.self, from: bytes)
         guard settings.audioDirectory.isFileURL, settings.transcriptDirectory.isFileURL,
               settings.audioHistoryDirectories.allSatisfy(\.isFileURL) else {
             throw MeetingError.message("保存目录配置无效，请检查 settings.json。")
         }
         return settings
     }
+    public static func checkVersion(_ bytes: Data) throws {
+        guard let object = (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any] else { throw MeetingReadError("INVALID_SETTINGS", "配置文件损坏，请保留原文件。") }
+        if let version = object["schemaVersion"] {
+            guard let value = version as? Int, value == 1 else { throw MeetingReadError("UNSUPPORTED_SCHEMA", "存储配置来自更新的格式，请使用兼容版本打开。") }
+        }
+    }
     public func save(_ settings: StorageSettings, validating directory: URL) throws {
+        if FileManager.default.fileExists(atPath: settingsURL.path) { try Self.checkVersion(Data(contentsOf: settingsURL)) }
         guard directory.isFileURL else { throw MeetingError.message("请选择本机文件夹。") }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // Confirm actual write access before replacing the working configuration.
@@ -56,6 +75,10 @@ public struct StorageSettingsStore: Sendable {
         try Data("Meeting Intelligence".utf8).write(to: probe, options: .withoutOverwriting)
         defer { try? FileManager.default.removeItem(at: probe) }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(settings).write(to: settingsURL, options: .atomic)
+        let encoded = try encoder.encode(settings)
+        var object = FileManager.default.fileExists(atPath: settingsURL.path)
+            ? (try JSONSerialization.jsonObject(with: Data(contentsOf: settingsURL)) as? [String: Any] ?? [:]) : [:]
+        for (key, value) in try JSONSerialization.jsonObject(with: encoded) as! [String: Any] { object[key] = value }
+        try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]).write(to: settingsURL, options: .atomic)
     }
 }

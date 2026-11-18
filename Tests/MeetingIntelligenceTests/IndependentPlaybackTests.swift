@@ -179,3 +179,24 @@ import Testing
     #expect(!model.togglePagePlayback())
     #expect(model.playback.recordingID == second.id && !model.playback.isPlaying)
 }
+
+@Test @MainActor func candidateAppReadsPreviousFormatWithoutRewritingOrPreparingModels() throws {
+    let fixture = try PlaybackFixture(); defer { fixture.clean() }
+    let settingsStore = try StorageSettingsStore(base: fixture.root)
+    let settings = try settingsStore.load()
+    let id = fixture.records[0].id
+    let manifest = settings.audioDirectory.appendingPathComponent(id.uuidString).appendingPathComponent("recording.json")
+    let transcript = URL(fileURLWithPath: fixture.records[0].transcriptPath!)
+    for url in [manifest, transcript] {
+        var object = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        object["schemaVersion"] = 1
+        try JSONSerialization.data(withJSONObject: object).write(to: url, options: .atomic)
+    }
+    let originalManifest = try Data(contentsOf: manifest), originalTranscript = try Data(contentsOf: transcript)
+    try fixture.model.reload()
+    #expect(fixture.model.recordings.count == 2)
+    #expect(fixture.model.transcription.documents[id]?.segments.count == 3)
+    #expect(!fixture.model.modelPreparing)
+    #expect(try Data(contentsOf: manifest) == originalManifest)
+    #expect(try Data(contentsOf: transcript) == originalTranscript)
+}

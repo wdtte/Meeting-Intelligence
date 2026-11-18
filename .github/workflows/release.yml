@@ -89,6 +89,23 @@ jobs:
           MEETING_CODESIGN_IDENTITY: '-'
         run: ./scripts/build-app.sh release
 
+      - name: Verify packaged upgrade from v0.2.6
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_ARCH: ${{ matrix.platform.arch }}
+        run: |
+          previous="$RUNNER_TEMP/meeting-previous"
+          mkdir -p "$previous"
+          suffix=""
+          app='build/Meeting Intelligence.app'
+          if [[ "$MEETING_BUILD_EDITION" == compatibility ]]; then
+            suffix='-macos15-whisper'
+            app='build/compatibility/Meeting Intelligence.app'
+          fi
+          gh release download v0.2.6 --repo wdtte/Meeting-Intelligence --pattern "Meeting-Intelligence-0.2.6-macos-$EXPECTED_ARCH$suffix.zip" --dir "$previous"
+          ditto -x -k "$previous/Meeting-Intelligence-0.2.6-macos-$EXPECTED_ARCH$suffix.zip" "$previous/unpacked"
+          python3 scripts/verify-upgrade.py "$previous/unpacked/Meeting Intelligence.app" "$app"
+
       - name: Set up Node for DMG packaging
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

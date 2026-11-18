@@ -2,6 +2,12 @@ import Foundation
 
 protocol TranscriptionHTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+    func upload(_ request: URLRequest, file: URL) async throws -> (Data, HTTPURLResponse)
+}
+extension TranscriptionHTTPTransport {
+    func upload(_ request: URLRequest, file: URL) async throws -> (Data, HTTPURLResponse) {
+        var request = request; request.httpBody = try Data(contentsOf: file); return try await send(request)
+    }
 }
 
 /// No disk cache, cookies or redirects (in particular, no forwarding Bearer keys).
@@ -16,8 +22,13 @@ struct TranscriptionURLTransport: TranscriptionHTTPTransport {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil; configuration.urlCache = nil
         configuration.timeoutIntervalForRequest = 90
-        configuration.timeoutIntervalForResource = 120
+        configuration.timeoutIntervalForResource = 1800
         session = URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
+    }
+    func upload(_ request: URLRequest, file: URL) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await session.upload(for: request, fromFile: file)
+        guard let response = response as? HTTPURLResponse else { throw MeetingError.message("云端响应无效。") }
+        return (data, response)
     }
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await session.data(for: request)
@@ -40,7 +51,7 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
     init(configuration: CloudTranscriptionConfiguration, apiKey: String,
          transport: any TranscriptionHTTPTransport, diagnostics: DiagnosticLog = .shared,
          pollWait: @escaping @Sendable (Int) async throws -> Void = { attempt in
-             try await Task.sleep(for: .seconds(min(10, 2 + attempt)))
+             try await Task.sleep(for: .seconds(min(60, 2 + attempt * 2)))
          }) {
         self.diagnostics = diagnostics
         self.configuration = configuration; self.apiKey = apiKey; self.transport = transport; self.pollWait = pollWait
@@ -56,6 +67,7 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
         var context = ["chunk_id": request.chunk.id.uuidString, "source": request.chunk.audioSource.rawValue,
                        "region": configuration.region.rawValue, "model": configuration.model]
         if let id = request.recordingID { context["recording_id"] = id.uuidString }
+        if let id = request.sessionID { context["session_id"] = id.uuidString }
         diagnostics.record("cloud.chunk.begin", fields: context)
         do {
             var result = try await transcribeChunk(request, context: context, checkpoint: checkpoint)
@@ -89,7 +101,7 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
             submission.setValue("enable", forHTTPHeaderField: "X-DashScope-OssResourceResolve")
             submission.httpBody = try JSONSerialization.data(withJSONObject: [
                 "model": configuration.model, "input": ["file_urls": [fileURL]],
-                "parameters": ["channel_id": [0], "diarization_enabled": false]
+                "parameters": ["channel_id": [0], "diarization_enabled": configuration.diarizationEnabled == true]
             ])
             // Persist before the non-idempotent request. A timeout cannot prove rejection.
             try await checkpoint(ProviderCheckpoint(phase: .submitting))
@@ -109,15 +121,20 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
             throw MeetingError.message("云端 task ID 无效，请保留任务记录。")
         }
         var transientFailures = 0
-        for attempt in 0..<180 {
+        for attempt in 0..<(request.sessionID == nil ? 180 : 360) {
             try Task.checkCancellation()
+            if request.sessionID != nil {
+                try await checkpoint(ProviderCheckpoint(phase: .submitted, taskID: taskID, keyID: request.checkpoint?.keyID ?? APIUsageIdentity.keyID(for: apiKey)))
+            }
             let data: Data
             do {
                 let (body, response) = try await send(authorized(configuration.apiBase.appendingPathComponent("tasks/\(taskID)")), stage: "poll", context: context.merging(["task_id": taskID, "attempt": String(attempt)]) { _, new in new })
                 if response.statusCode == 429 || response.statusCode >= 500 {
                     transientFailures += 1
                     guard transientFailures <= 5 else { throw MeetingError.message("查询云端任务暂不可用，稍后继续会复用已有 task ID。") }
-                    try await pollWait(attempt); continue
+                    if let seconds = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init), seconds > 0 {
+                        try await Task.sleep(for: .seconds(min(60, seconds)))
+                    } else { try await pollWait(attempt) }; continue
                 }
                 try check(response, data: body); data = body
             } catch let error as URLError where error.code != .cancelled {
@@ -146,7 +163,7 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
                 // Signed result URL does not receive the API key.
                 let (body, response) = try await send(URLRequest(url: url), stage: "result", context: context.merging(["task_id": taskID]) { _, new in new })
                 try check(response, data: body)
-                var transcription = try Self.parse(body, chunk: request.chunk)
+                var transcription = try Self.parse(body, input: request.input, sessionID: request.sessionID)
                 transcription.usage = transcription.usage ?? envelope.usage?.value
                 return transcription
             case "FAILED", "CANCELED", "UNKNOWN":
@@ -166,6 +183,7 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
     }
     private func send(_ request: URLRequest, stage: String, context: [String: String]) async throws -> (Data, HTTPURLResponse) {
         var fields = context
+        if context["session_id"] != nil { fields.removeValue(forKey: "task_id"); fields.removeValue(forKey: "request_id") }
         fields["stage"] = stage
         diagnostics.record("cloud.http.begin", fields: fields)
         do {
@@ -183,10 +201,12 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
                         var subtask = fields
                         subtask["status"] = result["subtask_status"] as? String
                         subtask["code"] = result["code"] as? String
+                        if context["session_id"] != nil { subtask.removeValue(forKey: "task_id"); subtask.removeValue(forKey: "request_id") }
                         diagnostics.record("cloud.subtask.result", fields: subtask)
                     }
                 }
             }
+            if context["session_id"] != nil { fields.removeValue(forKey: "task_id"); fields.removeValue(forKey: "request_id") }
             diagnostics.record("cloud.http.response", fields: fields)
             return (data, response)
         } catch {
@@ -225,24 +245,33 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
               !policy.upload_dir.contains("\r"), !policy.upload_dir.contains("\n") else {
             throw MeetingError.message("文件上传凭证中的地址无效。")
         }
-        let bytes = try Data(contentsOf: url, options: .mappedIfSafe)
-        guard bytes.count <= 16 * 1024 * 1024 else { throw MeetingError.message("音频片段超过当前上传上限（16 MB）。") }
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size > 0, size <= CloudAudioLimits.maximumBytes else { throw MeetingError.message("音频超过上传保护上限。") }
         let key = policy.upload_dir + "/" + UUID().uuidString + ".wav"
         let boundary = "Meeting-\(UUID())"
-        var body = Data()
-        func append(_ value: String) { body.append(Data(value.utf8)) }
+        let multipart = FileManager.default.temporaryDirectory.appendingPathComponent("Meeting-Multipart-\(UUID())")
+        FileManager.default.createFile(atPath: multipart.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        defer { try? FileManager.default.removeItem(at: multipart) }
+        let writer = try FileHandle(forWritingTo: multipart)
+        defer { try? writer.close() }
+        func append(_ value: String) throws { try writer.write(contentsOf: Data(value.utf8)) }
         let fields = ["OSSAccessKeyId": policy.oss_access_key_id, "policy": policy.policy,
                       "Signature": policy.signature, "key": key,
                       "x-oss-object-acl": policy.x_oss_object_acl,
                       "x-oss-forbid-overwrite": policy.x_oss_forbid_overwrite, "success_action_status": "200"]
         for (name, value) in fields {
-            append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n")
+            try append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n")
         }
-        append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n")
-        body.append(bytes); append("\r\n--\(boundary)--\r\n")
-        var upload = URLRequest(url: host); upload.httpMethod = "POST"; upload.httpBody = body
+        try append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n")
+        let reader = try FileHandle(forReadingFrom: url)
+        defer { try? reader.close() }
+        while let bytes = try reader.read(upToCount: 262144), !bytes.isEmpty {
+            try Task.checkCancellation(); try writer.write(contentsOf: bytes)
+        }
+        try append("\r\n--\(boundary)--\r\n"); try writer.synchronize()
+        var upload = URLRequest(url: host); upload.httpMethod = "POST"; upload.timeoutInterval = 1800
         upload.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let (result, uploaded) = try await send(upload, stage: "upload", context: context)
+        let (result, uploaded) = try await transport.upload(upload, file: multipart)
         try check(uploaded, data: result)
         return "oss://" + key
     }
@@ -251,6 +280,9 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
             (url.port == nil || url.port == 443) && (url.host?.hasSuffix(".aliyuncs.com") == true)
     }
     static func parse(_ data: Data, chunk: AudioChunk) throws -> ProviderTranscription {
+        try parse(data, input: TranscriptionAudioInput(chunk: chunk), sessionID: nil)
+    }
+    static func parse(_ data: Data, input chunk: TranscriptionAudioInput, sessionID: UUID?) throws -> ProviderTranscription {
         let result = try JSONDecoder().decode(ResultFile.self, from: data)
         var segments: [TranscriptSegment] = []
         guard result.transcripts.count == 1, let transcript = result.transcripts.first, transcript.channel_id == 0 else {
@@ -260,16 +292,19 @@ public struct QwenTranscriptionProvider: TranscriptionProvider {
             guard !sentence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             let start = sentence.begin_time / 1000, end = sentence.end_time / 1000
             guard start.isFinite, end.isFinite, start >= 0, start < chunk.duration, end > start,
-                  end <= chunk.duration + 0.1 else { throw MeetingError.message("云端时间戳无效，保留原字幕。") }
+                  end <= chunk.duration + (sessionID == nil ? 0.1 : 0.02) else { throw MeetingError.message("云端时间戳无效，保留原字幕。") }
             var segment = TranscriptSegment(chunkID: chunk.id, source: chunk.audioSource,
                                             start: chunk.offset + min(start, chunk.duration),
                                             end: chunk.offset + min(end, chunk.duration), text: sentence.text)
-            segment.engine = "Qwen-Audio 3.1"; segments.append(segment)
+            segment.engine = "Qwen-Audio 3.1"
+            if let sessionID { segment.chunkID = nil; segment.sessionID = sessionID; segment.providerSpeakerID = sentence.speaker_id?.value }
+            segments.append(segment)
         }
         guard !segments.isEmpty || (transcript.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) else {
             throw MeetingError.message("云端文字缺少句级时间戳，保留原字幕以确保回听位置准确。")
         }
-        return ProviderTranscription(segments: segments, usage: result.usage?.value)
+        guard zip(segments, segments.dropFirst()).allSatisfy({ $0.start <= $1.start }) else { throw MeetingError.message("云端句子时间顺序无效。") }
+        return ProviderTranscription(segments: segments, usage: result.usage?.value, noSpeechRecognized: segments.isEmpty)
     }
 }
 private struct APIError: Decodable { var code: String? }
@@ -293,5 +328,14 @@ private struct TaskEnvelope: Decodable {
 private struct ResultFile: Decodable {
     var transcripts: [Transcript]; var usage: TokenUsage?
     struct Transcript: Decodable { var channel_id: Int; var text: String?; var sentences: [Sentence]? }
-    struct Sentence: Decodable { var begin_time: Double; var end_time: Double; var text: String }
+    struct Sentence: Decodable { var begin_time: Double; var end_time: Double; var text: String; var speaker_id: SpeakerIdentifier? }
+}
+
+private struct SpeakerIdentifier: Decodable {
+    var value: String
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let number = try? container.decode(Int.self) { value = String(number) }
+        else { value = try container.decode(String.self) }
+    }
 }

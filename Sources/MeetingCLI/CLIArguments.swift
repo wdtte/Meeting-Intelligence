@@ -43,7 +43,7 @@ struct CLICommand {
             .init(name: "show", summary: "读取会议信息、处理计数和当前 revision。", positional: "<id>", options: []),
             .init(name: "transcript", summary: "分页读取完整句子；时间范围为 [from,to)。", positional: "[<id> | --file <path>]",
                   options: paging + [.init("file", "独立 transcript.json；与会议 ID 互斥。"), .init("from", "number", "起始相对秒数（包含）。"),
-                                     .init("to", "number", "结束相对秒数（不含）。"), .init("source", "采集来源，不代表真实说话人。", choices: ["application", "microphone"]),
+                                     .init("to", "number", "结束相对秒数（不含）。"), .init("source", "采集来源，不代表真实说话人。", choices: ["application", "microphone", "imported"]),
                                      .init("max-chars", "integer", "每页原文 Unicode scalar 预算；不截断句子。", default: 20000),
                                      .init("require-complete", "boolean", "要求本地及已启用的云端处理全部完成。", default: false)]),
             .init(name: "search", summary: "Unicode 规范化、大小写折叠后的确定性子串检索。", positional: "<query>",

@@ -32,7 +32,7 @@ func playbackSpeedStretchesSharedTimelineWithoutChangingPitch(speed: PlaybackSpe
     let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
     var recording = Recording(title: "Speed fixture", applicationName: "fixture", bundleIdentifier: "fixture")
     try store.save(recording)
-    for (index, source) in AudioSource.allCases.enumerated() {
+    for (index, source) in [AudioSource.application, .microphone].enumerated() {
         let sourceRate: Double = source == .application ? 48000 : 24000
         let sourceFormat = AVAudioFormat(standardFormatWithSampleRate: sourceRate, channels: 1)!
         let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: UInt32(sourceRate * 2))!

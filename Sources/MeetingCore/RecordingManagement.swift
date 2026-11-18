@@ -12,8 +12,8 @@ extension RecordingStore {
 
     func readForManagement(_ id: UUID) throws -> Recording {
         let url = directory(for: id).appendingPathComponent("recording.json")
-        let recording = try JSONDecoder().decode(Recording.self, from: Data(contentsOf: url))
-        guard recording.id == id, recording.schemaVersion == 1, recording.status != .recording else {
+        let recording = try DiskFormat.read(Recording.self, at: url)
+        guard recording.id == id, (1...2).contains(recording.schemaVersion), recording.status != .recording else {
             throw MeetingError.message("无法修改正在录制或信息异常的会议。")
         }
         return recording

@@ -74,10 +74,18 @@ public struct APIUsageReport: Sendable {
         for recording in recordings {
             guard let document = documents[recording.id], document.recordingID == recording.id else { continue }
             if let cloud = document.cloud {
-                for job in cloud.jobs.values where job.completed && !job.skippedSilence {
+                let jobs = Array(cloud.jobs.values) + (cloud.history ?? []).flatMap { Array(($0.jobs ?? [:]).values) }
+                for job in jobs where job.completed && !job.skippedSilence {
                     samples.append(Sample(recording: recording, date: job.usage?.recordedAt ?? recording.startedAt,
                         usage: job.usage, identity: APIUsageIdentity(modelName: job.usage?.modelName ?? cloud.configuration.model,
                                                                    keyID: job.usage?.keyID), isSummary: false))
+                }
+            }
+            if let cloud = document.cloud {
+                let sessions = (cloud.sessions ?? []) + (cloud.history ?? []).flatMap(\.sessions)
+                for session in sessions where session.status == "completed" && session.usage != nil {
+                    samples.append(Sample(recording: recording, date: session.usage?.recordedAt ?? recording.startedAt,
+                        usage: session.usage, identity: APIUsageIdentity(modelName: session.usage?.modelName ?? session.model, keyID: session.usage?.keyID), isSummary: false))
                 }
             }
             // Failed retries can retain a previous successful summary and its usage.

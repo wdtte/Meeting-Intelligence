@@ -10,9 +10,10 @@ public enum AgentTranscriptExport {
         return formatter.string(from: date)
     }
     public static func nullable(_ value: Any?) -> Any { value ?? NSNull() }
-    public static func segment(_ value: TranscriptSegment) -> [String: Any] {
-        ["segment_id": value.id.uuidString, "chunk_id": value.chunkID.uuidString, "source": value.source.rawValue,
-         "start": value.start, "end": value.end, "text": value.text, "engine": nullable(value.engine)]
+    public static func segment(_ value: TranscriptSegment, document: TranscriptDocument? = nil) -> [String: Any] {
+        ["segment_id": value.id.uuidString, "chunk_id": nullable(value.chunkID?.uuidString), "source": value.source.rawValue,
+         "start": value.start, "end": value.end, "text": value.text, "engine": nullable(value.engine), "session_id": nullable(value.sessionID?.uuidString),
+         "speaker_id": nullable(value.speakerID?.uuidString), "speaker_name": nullable(document.map { $0.speakerName(for: value) })]
     }
     public static func metadata(_ snapshot: MeetingReadSnapshot) -> [String: Any] {
         let r = snapshot.recording, t = snapshot.transcript
@@ -20,13 +21,17 @@ public enum AgentTranscriptExport {
                 "title": nullable(r?.title), "application_name": nullable(r?.applicationName),
                 "bundle_identifier": nullable(r?.bundleIdentifier), "started_at": nullable(r.map { timestamp($0.startedAt) }),
                 "ended_at": nullable(r?.endedAt.map(timestamp)), "duration": nullable(r?.duration),
-                "recording_status": nullable(r?.status.rawValue), "local_status": nullable(t?.status),
+                "recording_status": nullable(r?.status.rawValue), "local_status": r?.effectivePlan == .cloudOnly ? "not_requested" : nullable(t?.status),
                 "cloud_status": snapshot.cloudEnabled ? (t?.cloud?.status ?? "pending") : "disabled",
                 "content_state": snapshot.contentState, "revision": snapshot.revision,
                 "locale": nullable(t?.locale), "segment_count": t?.segments.count ?? 0,
                 "has_transcript": t?.segments.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false,
                 "closed_chunk_count": nullable(snapshot.closedChunkCount), "processed_chunk_count": nullable(snapshot.processedChunkCount),
-                "local_completion_ratio": nullable(snapshot.closedChunkCount.flatMap { total in
+                "transcription_plan": r?.effectivePlan.rawValue ?? "localThenCloud",
+                "origin": r?.origin?.rawValue ?? "recorded",
+                "cloud_session_count": t?.cloud?.sessions?.count ?? 0,
+                "cloud_completed_session_count": t?.cloud?.sessions?.filter { $0.status == "completed" }.count ?? 0,
+                "local_completion_ratio": nullable(r?.effectivePlan == .cloudOnly ? nil : snapshot.closedChunkCount.flatMap { total in
                     total == 0 ? nil : Double(snapshot.processedChunkCount ?? 0) / Double(total)
                 }),
                 "cloud_completed_chunk_count": nullable(t?.cloud?.completedCount),
@@ -36,7 +41,7 @@ public enum AgentTranscriptExport {
         ["code": value.code, "message": value.message, "meeting_id": nullable(value.meetingID?.uuidString), "path": nullable(value.path)]
     }
     public static func envelope(data: Any, warnings: [MeetingReadWarning] = [], page: [String: Any]? = nil, partial: Bool = false) -> [String: Any] {
-        var result: [String: Any] = ["schema_version": "1", "data": data, "warnings": warnings.map(warning), "partial_results": partial]
+        var result: [String: Any] = ["schema_version": "2", "data": data, "warnings": warnings.map(warning), "partial_results": partial]
         if let page { result["page"] = page }
         return result
     }
@@ -49,7 +54,7 @@ public enum AgentTranscriptExport {
             data["summary"] = ["text": nullable(summary.text), "model": nullable(summary.model),
                                "provider": summary.provider.rawValue, "generated_at": nullable(summary.generatedAt.map(timestamp))]
         } else { data["summary"] = NSNull() }
-        data["segments"] = value.segments.map(segment)
+        data["segments"] = value.segments.map { segment($0, document: value.transcript) }
         data["exported_at"] = timestamp(exportedAt)
         return envelope(data: data, warnings: value.warnings)
     }
@@ -64,7 +69,7 @@ public enum AgentTranscriptExport {
     public static func markdown(_ value: MeetingReadSnapshot, exportedAt: Date = Date()) -> String {
         var lines = ["# \(markdownEscape(value.recording?.title ?? "Transcript"))", "",
                      "meeting_id: \(value.meetingID.uuidString)", "revision: \(value.revision)",
-                     "exported_at: \(timestamp(exportedAt))", "schema_version: 1",
+                     "exported_at: \(timestamp(exportedAt))", "schema_version: 2",
                      "content_state: \(value.contentState)", "local_status: \(value.transcript?.status ?? "unavailable")",
                      "cloud_status: \(value.cloudEnabled ? (value.transcript?.cloud?.status ?? "pending") : "disabled")",
                      "summary_status: \(value.transcript?.summaryState ?? "not_generated")", ""]
@@ -78,7 +83,10 @@ public enum AgentTranscriptExport {
         for segment in value.segments {
             lines += ["## \(segment.start)–\(segment.end)s · \(segment.source.rawValue)", "",
                       "meeting_id: \(value.meetingID.uuidString)  ", "revision: \(value.revision)  ",
-                      "segment_id: \(segment.id.uuidString)  ", "chunk_id: \(segment.chunkID.uuidString)  ",
+                      "segment_id: \(segment.id.uuidString)  ", "chunk_id: \(segment.chunkID?.uuidString ?? "null")  ",
+                      "session_id: \(segment.sessionID?.uuidString ?? "null")  ",
+                      "speaker_id: \(segment.speakerID?.uuidString ?? "null")  ",
+                      "speaker_name: \(markdownEscape(value.transcript?.speakerName(for: segment) ?? "未区分发言人"))  ",
                       "engine: \(markdownEscape(segment.engine ?? "null"))", "",
                       // Blockquotes retain literal line breaks and keep transcript content separate from citation fields.
                       segment.text.components(separatedBy: .newlines).map { "> " + markdownEscape($0) }.joined(separator: "\n"), ""]

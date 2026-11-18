@@ -42,7 +42,7 @@ public final class TranscriptionCoordinator {
     public func wait(for id: UUID) async { await tasks[id]?.value; await cloudTasks[id]?.value; await summaryTasks[id]?.value }
 
     public func load(_ recording: Recording) {
-        guard !running.contains(recording.id), !summaryRunning.contains(recording.id), let path = recording.transcriptPath else { return }
+        guard !running.contains(recording.id), !cloudRunning.contains(recording.id), !summaryRunning.contains(recording.id), let path = recording.transcriptPath else { return }
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else { return }
         do {
@@ -70,7 +70,18 @@ public final class TranscriptionCoordinator {
     }
     public func submit(_ recording: Recording, store: RecordingStore, retry: Bool = false) {
         guard let path = recording.transcriptPath else { return }
+        if recording.effectivePlan == .cloudOnly {
+            if retry { paused.remove(recording.id) }
+            guard !paused.contains(recording.id), tasks[recording.id] == nil, cloudTasks[recording.id] == nil else { return }
+            if documents[recording.id] == nil { load(recording) }
+            startCloud(recording, store: store, retry: retry)
+            return
+        }
         pending[recording.id] = recording
+        if retry, let document = documents[recording.id], recording.status != .recording,
+           document.status == "completed", recording.chunks.filter(\.isComplete).allSatisfy({ document.processedChunks.contains($0.id) }) {
+            paused.remove(recording.id); startCloud(recording, store: store, retry: true); return
+        }
         if retry { paused.remove(recording.id) }
         guard !paused.contains(recording.id) else { return }
         guard tasks[recording.id] == nil, cloudTasks[recording.id] == nil else { return }
@@ -94,6 +105,7 @@ public final class TranscriptionCoordinator {
                     document = try TranscriptDocument.load(from: url, recordingID: recording.id)
                 } else {
                     document = TranscriptDocument(recordingID: recording.id, locale: recording.transcriptionLocale ?? "zh-CN")
+                    document.schemaVersion = recording.schemaVersion
                 }
                 document.status = "running"; document.error = nil
                 try document.save(to: url); self.documents[recording.id] = document
@@ -143,6 +155,13 @@ public final class TranscriptionCoordinator {
     public func resetUnfinishedCloudJobs(_ recording: Recording, store: RecordingStore) throws {
         guard !running.contains(recording.id), var document = documents[recording.id], var cloud = document.cloud else { return }
         cloud.jobs = cloud.jobs.filter { $0.value.completed }
+        if var sessions = cloud.sessions {
+            for index in sessions.indices where sessions[index].status != "completed" {
+                sessions[index].checkpoint = nil; sessions[index].status = "pending"; sessions[index].error = nil
+                sessions[index].submittedAt = nil
+            }
+            cloud.sessions = sessions
+        }
         cloud.error = nil; cloud.status = "interrupted"
         document.cloud = cloud
         guard let path = recording.transcriptPath else { return }
@@ -179,6 +198,11 @@ public final class TranscriptionCoordinator {
                 diagnosticContext["stage"] = "provider_prepare"
                 _ = try await provider.prepare(locale: document.locale)
                 let locale = document.locale
+                if cloud.configuration.usesSessions {
+                    try await self.transcribeSessions(recording, store: store, url: url)
+                    try self.updateCloud(recording.id, url: url) { $0.status = "completed"; $0.error = nil }
+                    return
+                }
                 var chunks = recording.chunks.filter {
                     $0.isComplete && self.documents[recording.id]?.cloud?.jobs[$0.id.uuidString]?.completed != true
                 }.sorted(by: { $0.offset < $1.offset }).makeIterator()
@@ -213,7 +237,7 @@ public final class TranscriptionCoordinator {
                 DiagnosticLog.shared.failure("cloud.meeting.failed", error: error, fields: diagnosticContext)
                 do {
                     try self.updateCloud(recording.id, url: url) {
-                        $0.status = Task.isCancelled || error is CancellationError ? "interrupted" : "failed"
+                        $0.status = Task.isCancelled || error is CancellationError || $0.sessions?.contains(where: { $0.checkpoint?.phase == .submitted && $0.status != "completed" }) == true ? "interrupted" : "failed"
                         $0.error = Task.isCancelled || error is CancellationError ? "云端精校已暂停，可继续查询已有任务。" : error.localizedDescription
                     }
                 } catch {
@@ -222,6 +246,122 @@ public final class TranscriptionCoordinator {
                 }
             }
         }
+    }
+    private func transcribeSessions(_ recording: Recording, store: RecordingStore, url: URL) async throws {
+        guard let cloud = documents[recording.id]?.cloud else { throw CancellationError() }
+        if cloud.sessions == nil {
+            var sessions: [CloudTranscriptionSession] = []
+            for source in AudioSource.allCases {
+                let chunks = recording.chunks.filter { $0.isComplete && $0.audioSource == source }.sorted { $0.offset < $1.offset }
+                guard !chunks.isEmpty else { continue }
+                let duration = chunks.map(\.end).max() ?? 0
+                try CloudAudioLimits.validate(duration: duration, diarization: cloud.configuration.diarizationEnabled == true)
+                let fingerprint = try await CloudSessionAudioBuilder.fingerprintAsync(chunks: chunks, store: store, recordingID: recording.id)
+                sessions.append(CloudTranscriptionSession(runID: cloud.runID, source: source, chunks: chunks, fingerprint: fingerprint, configuration: cloud.configuration))
+            }
+            guard !sessions.isEmpty else { throw MeetingError.message("没有可处理的完整音频。") }
+            let planned = sessions
+            try updateCloud(recording.id, url: url) { $0.sessions = planned }
+        }
+        guard let sessions = documents[recording.id]?.cloud?.sessions else { return }
+        // At most two source sessions overlap. Drain accepted work after one source fails.
+        var queue = sessions.filter { $0.status != "completed" }.makeIterator()
+        try await withThrowingTaskGroup(of: Result<Void, Error>.self) { group in
+            func enqueue(_ session: CloudTranscriptionSession) {
+                group.addTask {
+                    do { try await self.transcribeSession(session, recording: recording, store: store, url: url); return .success(()) }
+                    catch { return .failure(error) }
+                }
+            }
+            for _ in 0..<2 { if let session = queue.next() { enqueue(session) } }
+            var failure: Error?
+            while let result = try await group.next() {
+                if case .failure(let error) = result, failure == nil { failure = error }
+                if Task.isCancelled { group.cancelAll() }
+                if failure == nil, !Task.isCancelled, let session = queue.next() { enqueue(session) }
+            }
+            try Task.checkCancellation()
+            if let failure { throw failure }
+        }
+    }
+    private func transcribeSession(_ session: CloudTranscriptionSession, recording: Recording, store: RecordingStore, url: URL) async throws {
+        func update(_ body: (inout CloudTranscriptionSession) -> Void) throws {
+            try updateCloud(recording.id, url: url) { cloud in
+                if let index = cloud.sessions?.firstIndex(where: { $0.id == session.id }) { body(&cloud.sessions![index]) }
+            }
+        }
+        do {
+            if let submittedAt = session.submittedAt, session.checkpoint?.taskID != nil, Date().timeIntervalSince(submittedAt) > 24 * 3600 {
+                throw MeetingError.message("任务已超过供应商 24 小时查询窗口；请核对后明确重新提交，可能重新计费。")
+            }
+            let chunks = recording.chunks.filter { session.chunkIDs.contains($0.id) }
+            let fingerprint = try await CloudSessionAudioBuilder.fingerprintAsync(chunks: chunks, store: store, recordingID: recording.id)
+            guard fingerprint == session.inputFingerprint else { throw MeetingError.message("音频已变更，不能提交已有任务结果；请明确重新转写。") }
+            try Task.checkCancellation()
+            try update { $0.status = session.checkpoint?.taskID == nil ? "preparing" : "polling"; $0.error = nil }
+            var prepared: URL?
+            defer { if let prepared { try? FileManager.default.removeItem(at: prepared) } }
+            if session.checkpoint?.taskID == nil && session.checkpoint?.phase != .submitting {
+                prepared = try await CloudSessionAudioBuilder.build(chunks: chunks, store: store, recordingID: recording.id)
+            }
+            let provider = try cloudFactory(session.configuration)
+            let result = try await provider.transcribe(TranscriptionRequest(audioURL: prepared ?? store.root, session: session,
+                locale: documents[recording.id]?.locale ?? "zh-CN", recordingID: recording.id)) { [weak self] checkpoint in
+                try await self?.saveSessionCheckpoint(checkpoint, recordingID: recording.id, sessionID: session.id, url: url)
+            }
+            try Task.checkCancellation()
+            guard var latest = documents[recording.id] else { throw CancellationError() }
+            guard !result.segments.isEmpty || result.noSpeechRecognized else { throw MeetingError.message("云端未返回句级结果或明确的无语音状态。") }
+            try latest.commitSessionResult(result, session: session)
+            try latest.save(to: url); documents[recording.id] = latest
+        } catch {
+            try update { $0.status = error is CancellationError || $0.checkpoint?.phase == .submitted ? "interrupted" : "failed"; $0.error = error is CancellationError ? "已停止本机等待，远程任务可能继续运行和计费。" : error.localizedDescription }
+            throw error
+        }
+    }
+    private func saveSessionCheckpoint(_ checkpoint: ProviderCheckpoint, recordingID: UUID, sessionID: UUID, url: URL) throws {
+        try updateCloud(recordingID, url: url) { cloud in
+            guard let index = cloud.sessions?.firstIndex(where: { $0.id == sessionID }) else { return }
+            cloud.sessions?[index].checkpoint = checkpoint
+            if cloud.sessions?[index].submittedAt == nil { cloud.sessions?[index].submittedAt = Date() }
+            cloud.sessions?[index].lastPolledAt = Date()
+            cloud.sessions?[index].status = checkpoint.phase == .submitted ? "submitted" : "submitting"
+        }
+    }
+    public func editSpeakers(_ recording: Recording, edit: (inout TranscriptDocument) throws -> Void) throws {
+        guard !running.contains(recording.id), !summaryRunning.contains(recording.id), var document = documents[recording.id], let path = recording.transcriptPath else { throw MeetingError.message("处理完成后可修改发言人。") }
+        try edit(&document); try document.save(to: URL(fileURLWithPath: path)); documents[recording.id] = document
+    }
+    public func beginNewSessionRun(_ recording: Recording, configuration: CloudTranscriptionConfiguration) throws {
+        guard !running.contains(recording.id), !summaryRunning.contains(recording.id), var document = documents[recording.id], let path = recording.transcriptPath else { throw MeetingError.message("请等待当前任务完成。") }
+        var next = CloudTranscriptionProgress(configuration: configuration)
+        next.history = document.cloud?.history ?? []
+        if let cloud = document.cloud {
+            next.history?.append(CloudRunHistory(runID: cloud.runID, configuration: cloud.configuration, jobs: cloud.jobs,
+                sessions: cloud.sessions ?? [], segments: document.segments, speakers: document.speakers ?? [],
+                speakerOverrides: document.speakerOverrides, unassignedSegments: document.unassignedSegments))
+        }
+        if document.cloud == nil, !document.segments.isEmpty {
+            next.history?.append(CloudRunHistory(runID: UUID(), configuration: nil, jobs: nil, sessions: [], segments: document.segments,
+                speakers: document.speakers ?? [], speakerOverrides: document.speakerOverrides, unassignedSegments: document.unassignedSegments))
+        }
+        document.cloud = next
+        try document.save(to: URL(fileURLWithPath: path)); documents[recording.id] = document
+    }
+    public func restorePreviousRun(_ recording: Recording) throws {
+        guard !running.contains(recording.id), !summaryRunning.contains(recording.id), var document = documents[recording.id],
+              var cloud = document.cloud, let previous = cloud.history?.popLast(), let path = recording.transcriptPath else { throw MeetingError.message("没有可恢复的上一轮结果，或当前任务未结束。") }
+        let current = CloudRunHistory(runID: cloud.runID, configuration: cloud.configuration, jobs: cloud.jobs, sessions: cloud.sessions ?? [], segments: document.segments, speakers: document.speakers ?? [], speakerOverrides: document.speakerOverrides, unassignedSegments: document.unassignedSegments)
+        cloud.history?.append(current); cloud.runID = previous.runID; cloud.sessions = previous.sessions.isEmpty ? nil : previous.sessions
+        cloud.jobs = previous.jobs ?? [:]
+        if let config = previous.configuration ?? previous.sessions.first?.configuration { cloud.configuration = config }
+        cloud.status = previous.configuration == nil && previous.jobs == nil && previous.sessions.isEmpty ? "interrupted" : previous.sessions.isEmpty
+            ? ((previous.jobs ?? [:]).values.allSatisfy(\.completed) ? "completed" : "interrupted")
+            : (previous.sessions.allSatisfy { $0.status == "completed" } ? "completed" : "interrupted")
+        cloud.error = previous.configuration == nil && previous.jobs == nil && previous.sessions.isEmpty ? "已恢复此前本地字幕；该轮未请求云端转写，可明确选择继续。" : nil
+        document.cloud = cloud; document.segments = previous.segments; document.speakers = previous.speakers
+        document.speakerOverrides = previous.speakerOverrides; document.unassignedSegments = previous.unassignedSegments
+        try document.save(to: URL(fileURLWithPath: path)); documents[recording.id] = document
     }
     // Network waits overlap; all checkpoint/result mutations remain serialized on the main actor.
     private func transcribeCloudChunk(_ chunk: AudioChunk, recording: Recording, store: RecordingStore,
@@ -295,7 +435,7 @@ public final class TranscriptionCoordinator {
         guard canSummarize(recording), summaryTasks[recording.id] == nil,
               let path = recording.transcriptPath, var document = documents[recording.id] else { return }
         // Local-only transcripts require an explicit request to spend summary tokens.
-        guard retry || (recording.cloudTranscription != nil && document.cloud?.status == "completed") else { return }
+        guard retry || (recording.automaticSummary != false && recording.cloudTranscription != nil && document.cloud?.status == "completed") else { return }
         if !retry, document.currentSummary != nil || ["failed", "interrupted"].contains(document.summary?.status ?? "") { return }
         let url = URL(fileURLWithPath: path)
         // A corrupt or replaced file must not be overwritten by in-memory results.

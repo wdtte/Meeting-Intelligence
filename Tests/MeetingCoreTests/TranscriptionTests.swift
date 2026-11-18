@@ -68,7 +68,7 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
     var recognized = TranscriptSegment(chunkID: next.id, source: .microphone, start: 10.2, end: 11, text: "New text")
     recognized.engine = "Whisper base (q5_1)"
     try document.commit([recognized], for: next)
-    #expect(document.schemaVersion == 1)
+    #expect(document.schemaVersion == 2)
     #expect(document.segments.first == historical)
     #expect(document.segments.first?.engine == nil)
     #expect(document.engine == "Apple SpeechTranscriber + Whisper base (q5_1)")
@@ -81,7 +81,7 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
     // Identical words during double-talk must not be deleted or merged by text.
     // Acoustic echo belongs in capture processing, not transcript deduplication.
     for offset in [0.0, 10.0] {
-        for source in AudioSource.allCases {
+        for source in [AudioSource.application, .microphone] {
             let chunk = AudioChunk(source: source, fileName: "fixture.wav", offset: offset,
                                    duration: 10, sampleRate: 48000, channels: 1, isComplete: true)
             let segment = TranscriptSegment(chunkID: chunk.id, source: source,
@@ -137,7 +137,7 @@ private func makeBuffer(rate: Double, channels: UInt32, value: Float) -> AVAudio
     let recording = try writer.finish()
     let engine = AVAudioEngine()
     let players = [AVAudioPlayerNode(), AVAudioPlayerNode()]
-    for (index, source) in AudioSource.allCases.enumerated() {
+    for (index, source) in [AudioSource.application, .microphone].enumerated() {
         let files = try recording.chunks.filter { $0.audioSource == source }.map { ($0, try AVAudioFile(forReading: store.audioURL(recording: recording.id, fileName: $0.fileName))) }
         engine.attach(players[index]); engine.connect(players[index], to: engine.mainMixerNode, format: files[0].1.processingFormat)
         try PlaybackSchedule.enqueue(files, on: players[index], from: 0.12)
@@ -203,7 +203,7 @@ func localSpeechRecognizesFixtureWithRealTimestamps() async throws {
     let persisted = try TranscriptDocument.load(from: URL(fileURLWithPath: recording.transcriptPath!), recordingID: finished.id)
     #expect(persisted.status == "completed")
     #expect(persisted.processedChunks == Set(finished.chunks.map(\.id)))
-    #expect(Set(persisted.segments.map(\.source)) == Set(AudioSource.allCases))
+    #expect(Set(persisted.segments.map(\.source)) == Set([AudioSource.application, .microphone]))
     #expect(!persisted.segments.isEmpty)
 }
 
