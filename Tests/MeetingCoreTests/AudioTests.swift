@@ -217,7 +217,9 @@ private final class SharedRing: @unchecked Sendable {
     let shared = SharedRing(ring)
     let received = Mutex<[UInt64]>([])
     let group = DispatchGroup()
-    let deadline = ProcessInfo.processInfo.systemUptime + 10
+    // Shared Intel CI runners may spend over ten seconds scheduling these workers.
+    // Keep the complete 20,000-packet ordering check; allow bounded scheduling slack.
+    let deadline = ProcessInfo.processInfo.systemUptime + 60
     group.enter()
     DispatchQueue.global().async {
         for value in 1...20000 {
@@ -247,7 +249,9 @@ private final class SharedRing: @unchecked Sendable {
         group.leave()
     }
     group.wait()
-    #expect(received.withLock { $0 == Array(UInt64(1)...UInt64(20000)) })
+    let packets = received.withLock { $0 }
+    #expect(packets.count == 20000, "Ring stress test reached its scheduling deadline")
+    #expect(packets == Array(UInt64(1)...UInt64(20000)))
 }
 
 @Test func playbackRendersSilenceDuringCaptureGapsAndSeeksIntoAudio() throws {
