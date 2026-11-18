@@ -3,8 +3,8 @@ import Foundation
 public enum AudioSource: String, Codable, Sendable, CaseIterable {
     // Keep the legacy `application` wire value for system audio and older recordings.
     // These are capture sources, never inferred speakers.
-    case application, microphone
-    public var label: String { self == .application ? "系统音频" : "麦克风" }
+    case application, microphone, imported
+    public var label: String { switch self { case .application: "系统音频"; case .microphone: "麦克风"; case .imported: "导入音频" } }
 }
 
 public enum RecordingStatus: String, Codable, Sendable {
@@ -25,7 +25,7 @@ public struct AudioChunk: Identifiable, Codable, Sendable, Equatable {
 }
 
 public struct Recording: Identifiable, Codable, Sendable, Equatable {
-    public var schemaVersion = 1
+    public var schemaVersion = 2
     public var id: UUID = UUID()
     public var title: String
     public var applicationName: String
@@ -39,6 +39,11 @@ public struct Recording: Identifiable, Codable, Sendable, Equatable {
     public var transcriptionLocale: String?
     public var cloudTranscription: CloudTranscriptionConfiguration?
     public var microphoneCaptureMode: MicrophoneCaptureMode?
+    public var origin: RecordingOrigin?
+    public var importMetadata: AudioImportMetadata?
+    public var transcriptionPlan: TranscriptionPlan?
+    public var automaticSummary: Bool?
+    public var effectivePlan: TranscriptionPlan { transcriptionPlan ?? .localThenCloud }
     public var duration: Double { chunks.filter(\.isComplete).map(\.end).max() ?? 0 }
     public var audioDuration: Double { chunks.filter(\.isComplete).reduce(0) { $0 + $1.duration } }
 
@@ -71,4 +76,13 @@ public enum AudioTimeline {
         if value >= 3600 { return String(format: "%d:%02d:%02d", value / 3600, value / 60 % 60, value % 60) }
         return String(format: "%02d:%02d", value / 60, value % 60)
     }
+}
+
+public enum RecordingOrigin: String, Codable, Sendable { case recorded, imported }
+public enum TranscriptionPlan: String, Codable, Sendable { case localThenCloud, cloudOnly }
+public struct AudioImportMetadata: Codable, Sendable, Equatable {
+    public var originalFileName: String
+    public var importedAt: Date
+    public var format: String
+    public var duration: Double
 }

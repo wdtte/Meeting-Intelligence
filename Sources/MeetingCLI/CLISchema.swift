@@ -18,9 +18,10 @@ enum CLISchema {
     static var number: [String: Any] { ["type": "number", "minimum": 0] }
     static var nullableNumber: [String: Any] { ["type": ["number", "null"], "minimum": 0] }
     static var segment: [String: Any] {
-        object(["segment_id": string(format: "uuid"), "chunk_id": string(format: "uuid"),
-                "source": ["type": "string", "enum": ["application", "microphone"]], "start": number, "end": number,
-                "text": string(), "engine": string(nullable: true)])
+        object(["segment_id": string(format: "uuid"), "chunk_id": string(nullable: true, format: "uuid"),
+                "source": ["type": "string", "enum": ["application", "microphone", "imported"]], "start": number, "end": number,
+                "text": string(), "engine": string(nullable: true), "speaker_id": string(nullable: true, format: "uuid"),
+                "speaker_name": string(nullable: true), "session_id": string(nullable: true, format: "uuid")])
     }
     static var metadata: [String: Any] {
         ["meeting_id": string(format: "uuid"), "metadata_available": boolean, "title": string(nullable: true),
@@ -30,17 +31,18 @@ enum CLISchema {
          "cloud_status": string(), "content_state": ["type": "string", "enum": ["unavailable", "partial", "complete", "unknown"]],
          "revision": ["type": "string", "pattern": "^sha256:[0-9a-f]{64}$"], "locale": string(nullable: true),
          "segment_count": integer, "has_transcript": boolean, "closed_chunk_count": nullableInteger,
-         "processed_chunk_count": nullableInteger, "local_completion_ratio": nullableNumber, "cloud_completed_chunk_count": nullableInteger, "summary_status": string(nullable: true)]
+         "processed_chunk_count": nullableInteger, "local_completion_ratio": nullableNumber, "cloud_completed_chunk_count": nullableInteger, "summary_status": string(nullable: true), "transcription_plan": string(), "origin": string(),
+         "cloud_session_count": integer, "cloud_completed_session_count": integer]
     }
     static var page: [String: Any] { object(["next_cursor": string(nullable: true), "has_more": boolean]) }
     static var warning: [String: Any] {
         object(["code": string(), "message": string(), "meeting_id": string(nullable: true, format: "uuid"), "path": string(nullable: true)])
     }
     static var error: [String: Any] {
-        object(["schema_version": ["const": "1"], "error": object(["code": string(), "message": string(), "retryable": boolean])])
+        object(["schema_version": ["const": "2"], "error": object(["code": string(), "message": string(), "retryable": boolean])])
     }
     static func success(data: [String: Any], paged: Bool = false) -> [String: Any] {
-        var properties: [String: Any] = ["schema_version": ["const": "1"], "data": data,
+        var properties: [String: Any] = ["schema_version": ["const": "2"], "data": data,
                                          "warnings": array(warning), "partial_results": boolean]
         if paged { properties["page"] = page }
         return object(properties)

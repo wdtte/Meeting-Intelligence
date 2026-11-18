@@ -34,8 +34,8 @@ enum MeetingCLI {
             return .init(stdout: bytes, stderr: "", exitCode: 0)
         } catch {
             let problem = (error as? MeetingReadError) ?? MeetingReadError("INTERNAL_ERROR", "命令执行失败。", exitCode: 1)
-            let object: [String: Any] = ["schema_version": "1", "error": ["code": problem.code, "message": problem.message, "retryable": problem.retryable]]
-            let bytes = (try? AgentTranscriptExport.json(object)) ?? Data("{\"schema_version\":\"1\",\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"Encoding failed\",\"retryable\":false}}".utf8)
+            let object: [String: Any] = ["schema_version": "2", "error": ["code": problem.code, "message": problem.message, "retryable": problem.retryable]]
+            let bytes = (try? AgentTranscriptExport.json(object)) ?? Data("{\"schema_version\":\"2\",\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"Encoding failed\",\"retryable\":false}}".utf8)
             return .init(stdout: bytes + Data([10]), stderr: "", exitCode: problem.exitCode)
         }
     }
@@ -107,7 +107,7 @@ enum MeetingCLI {
                                          cursor: args.values["cursor"], limit: args.limit, maxChars: args.maxChars,
                                          cost: { MeetingQuery.characterCount($0.text) })
         var data = AgentTranscriptExport.metadata(snapshot)
-        data["segments"] = page.items.map(AgentTranscriptExport.segment)
+        data["segments"] = page.items.map { AgentTranscriptExport.segment($0, document: snapshot.transcript) }
         data["matching_segment_count"] = segments.count
         return AgentTranscriptExport.envelope(data: data, warnings: snapshot.warnings, page: pageInfo(page))
     }
@@ -161,7 +161,7 @@ enum MeetingCLI {
         data["query"] = args.positionals[0]; data["total_count"] = results.count
         data["results"] = page.items.map { result -> [String: Any] in
             var row = AgentTranscriptExport.metadata(result.snapshot)
-            row["segments"] = result.segments.map(AgentTranscriptExport.segment)
+            row["segments"] = result.segments.map { AgentTranscriptExport.segment($0, document: result.snapshot.transcript) }
             row["match_segment_ids"] = result.matchIDs.map(\.uuidString)
             return row
         }

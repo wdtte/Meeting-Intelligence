@@ -9,12 +9,12 @@ public struct PreparedCloudAudio: Sendable {
 public enum CloudAudioPreparation {
     /// Conservative energy gate, not speech classification: noise/music remain eligible.
     /// Only skips a whole near-zero chunk, so no timeline remapping or cut phonemes.
-    public static func prepare(url: URL, skipSilence: Bool) async throws -> PreparedCloudAudio {
-        let conversion = Task.detached(priority: .utility) { try convert(url: url, skipSilence: skipSilence) }
+    public static func prepare(url: URL, skipSilence: Bool, progress: (@Sendable (Double) async -> Void)? = nil) async throws -> PreparedCloudAudio {
+        let conversion = Task.detached(priority: .utility) { try await convert(url: url, skipSilence: skipSilence, progress: progress) }
         return try await withTaskCancellationHandler { try await conversion.value } onCancel: { conversion.cancel() }
     }
 
-    private static func convert(url: URL, skipSilence: Bool) throws -> PreparedCloudAudio {
+    private static func convert(url: URL, skipSilence: Bool, progress: (@Sendable (Double) async -> Void)?) async throws -> PreparedCloudAudio {
         let file = try AVAudioFile(forReading: url)
         let format = file.processingFormat
         guard file.length > 0, format.sampleRate.isFinite, format.sampleRate > 0,
@@ -25,8 +25,11 @@ public enum CloudAudioPreparation {
         var energies = [Double](repeating: 0, count: Int(format.channelCount))
         var peaks = [Float](repeating: 0, count: energies.count)
         var monoEnergy: Double = 0
+        var lastProgress = -Double.infinity
         while file.framePosition < file.length {
             try Task.checkCancellation()
+            let fraction = Double(file.framePosition) / Double(file.length) * 0.5
+            if fraction - lastProgress >= 0.01 { await progress?(fraction); lastProgress = fraction }
             try file.read(into: buffer)
             guard buffer.frameLength > 0, let samples = buffer.floatChannelData else { throw MeetingError.message("无法读取音频样本。") }
             for frame in 0..<Int(buffer.frameLength) {
@@ -66,6 +69,8 @@ public enum CloudAudioPreparation {
         var readError: Error?
         while true {
             try Task.checkCancellation()
+            let fraction = 0.5 + Double(file.framePosition) / Double(file.length) * 0.5
+            if fraction - lastProgress >= 0.01 { await progress?(fraction); lastProgress = fraction }
             var error: NSError?
             let status = converter.convert(to: converted, error: &error) { count, inputStatus in
                 if file.framePosition >= file.length { inputStatus.pointee = .endOfStream; return nil }
@@ -96,6 +101,7 @@ public enum CloudAudioPreparation {
             if status == .endOfStream { break }
             guard status != .error else { throw MeetingError.message("音频转换失败。") }
         }
+        await progress?(1)
         success = true
         return PreparedCloudAudio(url: destination)
     }

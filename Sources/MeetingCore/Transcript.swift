@@ -2,20 +2,23 @@ import Foundation
 
 public struct TranscriptSegment: Codable, Sendable, Equatable, Identifiable {
     public var id = UUID()
-    public var chunkID: UUID
+    public var chunkID: UUID?
     public var source: AudioSource
     public var start: Double
     public var end: Double
     public var text: String
+    public var sessionID: UUID?
+    public var speakerID: UUID?
+    public var providerSpeakerID: String?
     public var engine: String?
-    public init(chunkID: UUID, source: AudioSource, start: Double, end: Double, text: String) {
+    public init(chunkID: UUID?, source: AudioSource, start: Double, end: Double, text: String) {
         self.chunkID = chunkID; self.source = source; self.start = start; self.end = end; self.text = text
     }
     public func contains(_ time: Double) -> Bool { start <= time && time < end }
 }
 
 public struct TranscriptDocument: Codable, Sendable, Equatable {
-    public var schemaVersion = 1
+    public var schemaVersion = 2
     public var recordingID: UUID
     public var locale: String
     public var engine = "Apple SpeechTranscriber"
@@ -25,6 +28,9 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
     public var error: String?
     public var cloud: CloudTranscriptionProgress?
     public var summary: TranscriptSummary?
+    public var speakers: [Speaker]?
+    public var speakerOverrides: [String: UUID]?
+    public var unassignedSegments: Set<UUID>?
     public init(recordingID: UUID, locale: String) {
         self.recordingID = recordingID; self.locale = locale; self.engine = LocalTranscriber.engine
     }
@@ -46,7 +52,14 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
         // A summary describes a specific transcript snapshot. Never export stale text.
         if let summary, summary.inputFingerprint != summaryRequest.fingerprint { self.summary = nil }
     }
-    public var summaryRequest: SummaryRequest { SummaryRequest(recordingID: recordingID, locale: locale, segments: segments) }
+    public var summaryRequest: SummaryRequest { SummaryRequest(recordingID: recordingID, locale: locale, segments: resolvedSegments, speakers: speakers ?? [], attributionFingerprint: attributionFingerprint) }
+    private var attributionFingerprint: String? {
+        guard speakerOverrides?.isEmpty == false || unassignedSegments?.isEmpty == false else { return nil }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let overrides = (try? encoder.encode(speakerOverrides ?? [:])) ?? Data()
+        let unassigned = (unassignedSegments ?? []).map(\.uuidString).sorted().joined(separator: ",")
+        return DataMigration.hash(overrides + Data(unassigned.utf8))
+    }
     public var currentSummary: TranscriptSummary? {
         guard let summary, summary.status == "completed" || summary.generatedAt != nil,
               summary.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
@@ -67,13 +80,11 @@ public struct TranscriptDocument: Codable, Sendable, Equatable {
         }
     }
     public func save(to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(self).write(to: url, options: .atomic)
+        try DiskFormat.write(self, to: url)
     }
     public static func load(from url: URL, recordingID: UUID) throws -> Self {
-        let document = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
-        guard document.schemaVersion == 1, document.recordingID == recordingID else {
+        let document = try DiskFormat.read(Self.self, at: url)
+        guard (1...2).contains(document.schemaVersion), document.recordingID == recordingID else {
             throw MeetingError.message("Transcript 与会议不匹配，请保留原文件。")
         }
         return document

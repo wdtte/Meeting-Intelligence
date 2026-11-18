@@ -89,7 +89,7 @@ CLI DTO 与磁盘 Codable 模型分离，统一使用 snake_case；绝对时间�
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "data": {
     "meeting_id": "4DA1B104-2C81-4FB8-B9D1-38A963AF0042",
     "revision": "sha256:<digest>",
@@ -129,7 +129,7 @@ CLI DTO 与磁盘 Codable 模型分离，统一使用 snake_case；绝对时间�
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "error": {
     "code": "REVISION_CHANGED",
     "message": "转写已更新，请从首页重新读取或导出当前版本。",
@@ -160,7 +160,7 @@ CLI DTO 与磁盘 Codable 模型分离，统一使用 snake_case；绝对时间�
 
 引用由 `meeting_id + revision + segment_id + start/end` 构成；Markdown 导出附上这些信息及原文。时间戳是原音频中的相对位置，不是墙钟时间。
 
-当前应用没有转写历史；revision 只能发现变化，不能恢复旧文字。完整 JSON 导出包含会议信息、处理状态、全部 segments、revision、导出时间和 CLI schema 版本，是可保留的证据快照。默认目标存在时报错，只有 `--overwrite` 才原子替换；不修改原始会议文件。
+应用保留显式重新转写的 session 历史供本地恢复；CLI revision 只用于发现变化，不提供写入或恢复命令。完整 JSON 导出包含会议信息、处理状态、全部 segments、revision、导出时间和 CLI schema 版本，是可保留的证据快照。默认目标存在时报错，只有 `--overwrite` 才原子替换；不修改原始会议文件。
 
 ## 6. 搜索与长会议读取
 
@@ -227,3 +227,8 @@ CLI 路径只初始化只读对象，不触发采集、模型准备、Speech 下
 至少一项子进程集成测试验证 stdout 可被 JSON parser 直接解析、stderr 不混入正文、退出码正确，以及只读命令前后源目录文件内容和文件集合不变。时间和性能指标在有代表性数据集后记录，不预先承诺未经测量的延迟。
 
 以上命名、依赖和范围为推荐方案。下一步先完成 P1，再用一个真实 agent 跑通“找到会议 → 读取 → 带引用总结”，据此调整 P2 的检索和上下文接口。
+
+
+## v0.3.0 契约更新
+
+CLI 输出 schema_version 为 "2"，同时读取磁盘 v1/v2。source 增加 imported，chunk_id 可空，字幕提供 session_id、speaker_id、speaker_name；元数据提供 origin、transcription_plan 和 cloud_session_count/cloud_completed_session_count。cloudOnly 的 local_status 为 not_requested，local_completion_ratio 为 null；require-complete 按持久化计划校验必要 session。命令保持只读，不导入、不上传、不迁移。名称与应用、摘要、HTML 一致；不输出远程 task ID、Key 标识或私有 URL。以 meeting schema 为准，迁移规则参见 DATA-FORMAT-COMPATIBILITY.md。

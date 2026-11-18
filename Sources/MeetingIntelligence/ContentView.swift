@@ -16,6 +16,9 @@ struct ContentView: View {
                 Button { model.select(nil) } label: {
                     Label("新录制", systemImage: "plus").frame(maxWidth: .infinity).padding(.vertical, 10)
                 }.buttonStyle(MonochromeButtonStyle()).padding(.horizontal, 18).disabled(model.isBusy)
+                Button { model.chooseAudioImport() } label: {
+                    Label("导入音频…", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity)
+                }.padding(.horizontal, 18).disabled(model.isBusy || model.deletingRecordingID != nil || model.libraryError != nil)
                 VStack(alignment: .leading, spacing: 8) {
                     Text("最近会议").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         .padding(.horizontal, 18)
@@ -85,7 +88,14 @@ struct ContentView: View {
             GeometryReader { viewport in
                 VStack(spacing: 0) {
                     Group {
-                        if model.isBusy { LiveRecordingView(model: model) }
+                        if let progress = model.importProgress {
+                            VStack(spacing: 16) {
+                                Text("正在导入音频…").font(.title2)
+                                ProgressView(value: progress).frame(width: 320)
+                                Text(progress < 0.8 ? "正在解码并规范化音轨" : "正在保存 PCM 分片").foregroundStyle(.secondary)
+                                Button("取消导入") { model.cancelAudioImport() }
+                            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if model.isBusy { LiveRecordingView(model: model) }
                         else if model.page == .settings { SettingsPage(model: model) }
                         else if let recording = model.selectedRecording { detail(recording) }
                         else { setupView }
@@ -113,6 +123,21 @@ struct ContentView: View {
                            value: model.showsPlaybackBar)
             }
             .background(Color(nsColor: .textBackgroundColor))
+        }
+        .sheet(isPresented: Binding(get: { model.importPreview != nil }, set: { if !$0 { model.importPreview = nil; model.importURL = nil } })) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("导入音频并转写").font(.title2)
+                Text(model.importPreview?.fileName ?? "")
+                Text("时长 \(AudioTimeline.clock(model.importPreview?.duration ?? 0)) · Qwen \(model.qwenRegion.label)")
+                Toggle("区分发言人", isOn: $model.importDiarizationEnabled)
+                Toggle("转写后生成摘要（需已配置摘要服务）", isOn: $model.importAutomaticSummary)
+                Text("开始后会上传音频到所选地域。导入不需要本地语音模型，不请求录音权限。区分发言人最多 120 分钟。").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("取消") { model.importPreview = nil; model.importURL = nil }
+                    Spacer()
+                    Button("开始导入并上传") { model.startAudioImport() }.buttonStyle(.borderedProminent)
+                }
+            }.padding(28).frame(width: 460)
         }
         .navigationTitle("Meeting Intelligence")
         .toolbar(removing: .title)
@@ -155,6 +180,9 @@ struct ContentView: View {
                     Label("本地转写始终开启", systemImage: "checkmark.circle")
                         .font(.callout).foregroundStyle(.secondary)
                     Toggle("本次录制使用云端转写", isOn: $model.useCloudTranscription)
+                    if model.useCloudTranscription {
+                        Toggle("区分发言人（按来源分别识别，最多 120 分钟）", isOn: $model.diarizationEnabled)
+                    }
                     HStack {
                         Text(model.useCloudTranscription
                              ? "录制时显示本地字幕，结束后使用 \(model.cloudProvider.label) 云端精校。"
@@ -214,7 +242,7 @@ struct ContentView: View {
                         .disabled(!model.canManage(recording.id))
                 }
                 HStack(spacing: 16) {
-                    Label(recording.startedAt.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
+                    Label((recording.origin == .imported ? "导入于 " : "") + recording.startedAt.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
                     Label(recording.applicationName, systemImage: recording.bundleIdentifier.isEmpty ? "speaker.wave.2" : "app")
                     Label(AudioTimeline.clock(recording.duration), systemImage: "clock").fixedSize()
                 }.font(.caption).foregroundStyle(.secondary).lineLimit(1)

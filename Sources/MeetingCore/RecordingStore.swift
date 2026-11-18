@@ -22,10 +22,34 @@ public struct RecordingStore: Sendable {
         return directory(for: recording).appendingPathComponent(fileName)
     }
     public func save(_ recording: Recording) throws {
-        let folder = directory(for: recording.id)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(recording).write(to: folder.appendingPathComponent("recording.json"), options: .atomic)
+        try DiskFormat.write(recording, to: directory(for: recording.id).appendingPathComponent("recording.json"))
+    }
+    public func loadCatalog(recover: Bool = false) throws -> (recordings: [Recording], warnings: [String]) {
+        let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        var records: [Recording] = [], warnings: [String] = []
+        for folder in folders where UUID(uuidString: folder.lastPathComponent) != nil {
+            do { records.append(try loadFolder(folder, recover: recover)) }
+            catch { warnings.append("\(folder.path)：\(error.localizedDescription)") }
+        }
+        return (records.sorted { $0.startedAt > $1.startedAt }, warnings)
+    }
+    private func loadFolder(_ folder: URL, recover: Bool) throws -> Recording {
+        var recording = try DiskFormat.read(Recording.self, at: folder.appendingPathComponent("recording.json"))
+        guard recording.id.uuidString == folder.lastPathComponent else { throw MeetingError.message("录音目录与 ID 不匹配。") }
+        if recover && recording.status == .recording {
+            for index in recording.chunks.indices where !recording.chunks[index].isComplete {
+                let chunk = recording.chunks[index]
+                let url = try audioURL(recording: recording.id, fileName: chunk.fileName)
+                if FileManager.default.fileExists(atPath: url.path), let file = try? AVAudioFile(forReading: url), file.length > 0 {
+                    recording.chunks[index].duration = Double(file.length) / file.processingFormat.sampleRate
+                    recording.chunks[index].isComplete = true
+                }
+            }
+            recording.status = .interrupted
+            recording.note = "上次录音意外中断；已保留完成片段。"
+            try save(recording)
+        }
+        return recording
     }
     public func loadAll(recover: Bool = false) throws -> [Recording] {
         let folders = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
@@ -33,8 +57,8 @@ public struct RecordingStore: Sendable {
         for folder in folders where UUID(uuidString: folder.lastPathComponent) != nil {
             let url = folder.appendingPathComponent("recording.json")
             // A corrupt manifest is surfaced; it is never silently replaced or deleted.
-            var recording = try JSONDecoder().decode(Recording.self, from: Data(contentsOf: url))
-            guard recording.schemaVersion == 1, recording.id.uuidString == folder.lastPathComponent else {
+            var recording = try DiskFormat.read(Recording.self, at: url)
+            guard (1...2).contains(recording.schemaVersion), recording.id.uuidString == folder.lastPathComponent else {
                 throw MeetingError.message("无法读取录音目录：\(folder.lastPathComponent)。请保留原文件。")
             }
             if recover && recording.status == .recording {

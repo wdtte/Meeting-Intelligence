@@ -89,6 +89,23 @@ jobs:
           MEETING_CODESIGN_IDENTITY: '-'
         run: ./scripts/build-app.sh release
 
+      - name: Verify packaged upgrade from v0.2.6
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_ARCH: ${{ matrix.platform.arch }}
+        run: |
+          previous="$RUNNER_TEMP/meeting-previous"
+          mkdir -p "$previous"
+          suffix=""
+          app='build/Meeting Intelligence.app'
+          if [[ "$MEETING_BUILD_EDITION" == compatibility ]]; then
+            suffix='-macos15-whisper'
+            app='build/compatibility/Meeting Intelligence.app'
+          fi
+          gh release download v0.2.6 --repo wdtte/Meeting-Intelligence --pattern "Meeting-Intelligence-0.2.6-macos-$EXPECTED_ARCH$suffix.zip" --dir "$previous"
+          ditto -x -k "$previous/Meeting-Intelligence-0.2.6-macos-$EXPECTED_ARCH$suffix.zip" "$previous/unpacked"
+          python3 scripts/verify-upgrade.py "$previous/unpacked/Meeting Intelligence.app" "$app"
+
       - name: Set up Node for DMG packaging
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -167,6 +184,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out release notes
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Download release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -187,6 +208,10 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" ./*.dmg ./*.zip ./*.sha256 --clobber
           args=(--draft=false)
+          if [[ "$RELEASE_TAG" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)([-+][0-9A-Za-z.-]+)?$ ]]; then
+            notes="../docs/RELEASE-${BASH_REMATCH[1]}.md"
+            if [[ -f "$notes" ]]; then args+=(--notes-file "$notes"); fi
+          fi
           if [[ "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+- ]]; then
             args+=(--prerelease)
           fi

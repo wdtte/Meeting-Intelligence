@@ -31,6 +31,9 @@ struct TranscriptPanel: View {
     let live: Bool
     @TranscriptViewState private var confirmCloudResubmission = false
     @TranscriptViewState private var followPlayback = true
+    @TranscriptViewState private var confirmNewRun = false
+    @TranscriptViewState private var showSpeakers = false
+    @TranscriptViewState private var speakerDrafts: [UUID: String] = [:]
     private enum Page: Hashable { case transcript, summary }
     @TranscriptViewState private var page = Page.transcript
     @TranscriptViewState private var detailsExpanded = false
@@ -51,7 +54,7 @@ struct TranscriptPanel: View {
     }
     private var document: TranscriptDocument? { model.transcription.documents[recordingID] }
     private var isPlaybackRecord: Bool { !live && model.playback.recordingID == recordingID }
-    private var segments: [TranscriptSegment] { document?.segments ?? [] }
+    private var segments: [TranscriptSegment] { document?.resolvedSegments ?? [] }
     private var recording: Recording? { model.recordings.first { $0.id == recordingID } }
     private var isRunning: Bool { model.transcription.running.contains(recordingID) }
     private var isSummaryRunning: Bool { model.transcription.summaryRunning.contains(recordingID) }
@@ -64,6 +67,7 @@ struct TranscriptPanel: View {
     }
     private var cloudRequested: Bool { cloudModel != nil }
     private var status: String {
+        if recording?.effectivePlan == .cloudOnly { return document?.cloud?.status == "completed" ? (segments.isEmpty ? "未识别到语音" : "云端转写完成") : "云端直转，不执行本地识别" }
         if let error = document?.error { return error }
         if live, let notice = model.transcriptionNotice { return notice }
         if isRunning && !isCloudRunning { return "正在本地转写，音频已保存" }
@@ -104,6 +108,12 @@ struct TranscriptPanel: View {
                         transcriptionStatus
                     }
                     cloudProgress
+                    if !live, !(document?.speakers ?? []).isEmpty {
+                        Button("管理发言人") {
+                            speakerDrafts = Dictionary(uniqueKeysWithValues: (document?.speakers ?? []).map { ($0.id, $0.displayName ?? "") })
+                            showSpeakers = true
+                        }.font(.caption).disabled(isRunning || isSummaryRunning)
+                    }
                     exportStatus
                     if !live {
                         HStack(spacing: 12) {
@@ -136,9 +146,16 @@ struct TranscriptPanel: View {
                         LazyVStack(alignment: .leading, spacing: 4) {
                             if !live, document?.cloud != nil { transcriptDetails.padding(.horizontal, 12).padding(.bottom, 8) }
                             ForEach(segments) { segment in
-                                TranscriptRow(segment: segment, live: live,
+                                TranscriptRow(segment: segment, speakerName: document?.speakerName(for: segment) ?? "未区分发言人", live: live,
                                               active: isPlaybackRecord && segment.contains(model.playback.position)) {
                                     model.playSegment(segment, recordingID: recordingID)
+                                }.contextMenu {
+                                    if !live, !isRunning, !isSummaryRunning {
+                                        Button("未区分发言人") { model.assignSpeaker(nil, segmentID: segment.id, recordingID: recordingID) }
+                                        ForEach(document?.speakers ?? []) { speaker in
+                                            Button(speaker.name) { model.assignSpeaker(speaker.id, segmentID: segment.id, recordingID: recordingID) }
+                                        }
+                                    }
                                 }.id(segment.id)
                             }
                         }.padding(.horizontal, live ? 4 : 0)
@@ -293,7 +310,9 @@ struct TranscriptPanel: View {
         if let cloudModel {
             let cloud = document?.cloud
             let chunks = recording?.chunks.filter(\.isComplete) ?? []
-            let completed = chunks.count { cloud?.jobs[$0.id.uuidString]?.completed == true }
+            let sessionMode = cloud?.configuration.usesSessions == true
+            let total = sessionMode ? (cloud?.sessions?.count ?? 0) : chunks.count
+            let completed = sessionMode ? (cloud?.sessions?.filter { $0.status == "completed" }.count ?? 0) : chunks.count { cloud?.jobs[$0.id.uuidString]?.completed == true }
             let noFragment = cloud?.error?.contains("（SUCCESS_WITH_NO_VALID_FRAGMENT）") == true
             let progressText = switch cloud?.status {
             case "completed": "已完成"
@@ -307,10 +326,10 @@ struct TranscriptPanel: View {
                     Label(cloudModel, systemImage: "cloud").fontWeight(.medium)
                     Text(progressText)
                     Spacer(minLength: 4)
-                    if !live, !chunks.isEmpty { Text("\(completed) / \(chunks.count) 个片段").monospacedDigit() }
+                    if !live, !chunks.isEmpty { Text("\(completed) / \(total) \(sessionMode ? "条音轨" : "个片段")").monospacedDigit() }
                 }
                 if !live, !chunks.isEmpty {
-                    ProgressView(value: Double(completed), total: Double(chunks.count))
+                    ProgressView(value: Double(completed), total: Double(max(1, total)))
                         .controlSize(.mini)
                         .accessibilityLabel("云端转写进度")
                 }
@@ -318,7 +337,7 @@ struct TranscriptPanel: View {
                     Text(noFragment ? "有片段未识别到有效语音。点击「继续云端转写」可查询原任务并接着处理。" : error)
                         .foregroundStyle(.orange).textSelection(.enabled)
                 } else if let cloud, cloud.noSpeechCount > 0 {
-                    Text("\(cloud.noSpeechCount) 个片段未识别到语音，已保留本地结果")
+                    Text(recording?.effectivePlan == .cloudOnly ? "未识别到语音" : "\(cloud.noSpeechCount) 个识别单元未识别到语音，已保留可用本地字幕（无发言人归属）")
                 }
             }.font(.caption).foregroundStyle(.secondary)
         }
@@ -366,8 +385,15 @@ struct TranscriptPanel: View {
                 Button("使用 \(model.cloudProvider.label) 云端精校…", systemImage: "cloud") { model.transcribeSelected(useCloud: true) }
                     .disabled(!hasAudio)
             }
-            if document?.cloud?.status == "failed", !isRunning {
+            if ["failed", "interrupted"].contains(document?.cloud?.status ?? ""), !isRunning {
                 Button("核对后重新提交未完成片段…") { confirmCloudResubmission = true }
+            }
+            if !isRunning, !isSummaryRunning, hasAudio {
+                Toggle("区分发言人", isOn: $model.diarizationEnabled)
+                Button("重新转写（会重新上传和计费）…") { confirmNewRun = true }
+                if !(document?.cloud?.history ?? []).isEmpty {
+                    Button("恢复上一轮转写结果") { model.restorePreviousTranscription() }
+                }
             }
             Divider()
             Button("转写设置…", systemImage: "gearshape") { model.showSettings() }
@@ -375,6 +401,28 @@ struct TranscriptPanel: View {
             Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
         }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .help("转写操作").accessibilityLabel("更多转写操作")
+            .confirmationDialog("重新上传并开始新一轮转写？已有任务可能继续计费。旧结果保留在本地历史中，新任务不继承旧发言人姓名。", isPresented: $confirmNewRun) {
+                Button("重新上传并转写") { model.retranscribeWithSpeakers() }
+                Button("取消", role: .cancel) {}
+            }
+            .sheet(isPresented: $showSpeakers) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("管理发言人").font(.title2)
+                    Text("身份仅在各来源本次云任务内有效。同一人在两个来源中可能有两个条目；右键字幕可修正归属。改名会使摘要过期。").font(.caption)
+                    ForEach(document?.speakers ?? []) { speaker in
+                        let source = document?.cloud?.sessions?.first { $0.id == speaker.sessionID }?.source.label ?? "历史音轨"
+                        TextField("\(speaker.name) · \(source)", text: Binding(get: { speakerDrafts[speaker.id] ?? "" }, set: { speakerDrafts[speaker.id] = $0 }))
+                    }
+                    HStack {
+                        Button("取消") { showSpeakers = false }
+                        Spacer()
+                        Button("保存") {
+                            for (id, name) in speakerDrafts { model.editSpeaker(id, name: name, recordingID: recordingID) }
+                            showSpeakers = false
+                        }
+                    }
+                }.padding(28).frame(width: 480)
+            }
     }
 
     @ViewBuilder private var exportStatus: some View {
@@ -397,6 +445,7 @@ struct TranscriptPanel: View {
 
 private struct TranscriptRow: View {
     let segment: TranscriptSegment
+    let speakerName: String
     let live: Bool
     let active: Bool
     var play: () -> Void
@@ -410,6 +459,7 @@ private struct TranscriptRow: View {
                     .frame(width: 58, alignment: .leading).padding(.top, 2)
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 8) {
+                        Text(speakerName).font(.system(size: 11, weight: .semibold))
                         Label(segment.source.label, systemImage: segment.source == .microphone ? "mic" : "speaker.wave.2")
                             .font(.system(size: 11, weight: .medium))
                         Text(engineLabel).font(.caption2)
@@ -427,7 +477,7 @@ private struct TranscriptRow: View {
             }
             .contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(live)
-        .accessibilityLabel("\(segment.source.label)，\(engineLabel)，\(AudioTimeline.clock(segment.start))，\(segment.text)")
+        .accessibilityLabel("\(speakerName)，\(segment.source.label)，\(engineLabel)，\(AudioTimeline.clock(segment.start))，\(segment.text)")
         .help(live ? engineLabel : "点击回听 · \(engineLabel)")
     }
 }

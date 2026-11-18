@@ -76,6 +76,22 @@ For release packaging, install Node.js 24, run `npm ci --prefix scripts/dmg`, th
 
 Local transcription is always enabled. Audio is still saved if speech resources are not ready or transcription fails. Once resources are ready, use Resume Local Transcription (“继续本地转写”) in meeting history. Each meeting retains its transcription language; changing Settings mainly affects new meetings.
 
+### Import audio and manage speakers
+
+Choose Import Audio (“导入音频…”) in the sidebar for one WAV, M4A or MP3. Review the filename, duration, cloud region, speaker option and automatic-summary option, then select Start Import and Upload. A Qwen key is required before starting. Import uses your chosen storage folders, requires no local speech model or recording/microphone permission, and saves independent PCM audio. Deleting or renaming the source does not break playback. Cancel removes unpublished staging.
+
+Diarization has a **120-minute product limit**, following the provider recommendation. Disable it explicitly for longer files; normal limits still apply (12 hours / 2 GB). Audio is never silently truncated or split into multiple speaker tasks. Imported meetings show the import date. Both editions provide the same import/cloud features.
+
+Rows show speaker, source and engine. Use Manage Speakers (“管理发言人”) to name a speaker, or right-click a sentence to assign an existing speaker or leave it unassigned. Edits stay local and invalidate the previous summary. New runs create new identities and retain previous results for explicit recovery; they upload again and may incur charges. Summaries and escaped HTML/JSON/Markdown exports share the resolved names. There is no real-name inference or cross-meeting voiceprint library.
+
+### Upgrading safely
+
+Quit the old app before replacing it. Data and Keychain credentials live outside the bundle. Back up all current/custom/historical audio and transcript folders for a full copy. If Keychain access is denied after replacement, use Authorize Keychain Access in Settings; existing keys are preserved.
+
+New meetings use disk v2; existing v1 meetings stay readable without browsing-time migration or upload. Explicitly enabling v2 functionality first saves verified original-byte metadata backups under `~/Library/Application Support/Meeting Intelligence/Backups/`. Settings offers backup location and conflict-checked restoration. These backups exclude audio. Older apps cannot read v2; downgrade requires matching backups and separately preserving later changes. Corrupt/offline records are reported individually. See [format compatibility and recovery](docs/DATA-FORMAT-COMPATIBILITY.md).
+
+The read-only CLI now outputs **schema_version 2**, with nullable chunk/session/speaker fields and cloud-only completion semantics. Update consumers through `meeting schema`; disk v1 remains supported.
+
 ### Cloud transcription and meeting summaries
 
 Configure the two services independently: cloud transcription receives audio, while the summary service receives transcript text. You can use local transcription alone or manually generate a summary after local transcription finishes.
@@ -86,9 +102,9 @@ Configure the two services independently: cloud transcription receives audio, wh
 2. Choose Beijing or Singapore, then follow the link to Alibaba Cloud Model Studio to create and save an API key. The key, workspace, and model access must belong to the same region. Workspace ID is optional.
 3. Enable cloud transcription for the current recording (“本次录制使用云端转写”). Tasks are submitted after recording stops. You can also start cloud transcription (“云端转写”) for an existing recording from its history details.
 
-The app uses `qwen-audio-3.1-asr-flash-filetrans`, uploading each track and segment separately and processing up to three segments concurrently. Each successful result replaces that segment's local transcript while preserving meeting timestamps; failed segments retain their existing text. The per-recording cloud switch resets to off after recording ends or the recording page is reopened.
+The app uses `qwen-audio-3.1-asr-flash-filetrans`. New cloud tasks default to speaker diarization: one continuous mono task per source preserves initial silence and capture gaps, with up to two source tasks in parallel. Speaker identity is scoped to each task; one person on system and microphone tracks can appear twice. Disabling diarization retains chunk transcription for recordings (up to three concurrent chunks). Successful source results replace their transcript atomically; failures retain existing text. The per-recording cloud switch resets to off after recording ends or the recording page is reopened.
 
-Skip Entirely Silent Segments (“跳过整段静音”) is enabled by default. Only segments whose volume is near zero throughout are skipped; quiet speech, noise, and pauses within a segment may still be uploaded. Both tracks are metered separately. Actual charges are determined by your Model Studio bill.
+Skip Entirely Silent Segments (“跳过整段静音”) is enabled by default. This applies to legacy chunk transcription; continuous source tasks preserve all silence. Only segments whose volume is near zero throughout are skipped; quiet speech, noise, and pauses within a segment may still be uploaded. Both tracks are metered separately. Actual charges are determined by your Model Studio bill.
 
 Pausing stops further local submissions and polling. Tasks already accepted by the server may continue processing and incur charges. Resuming reuses saved task IDs. If submission status is uncertain, check the Model Studio console before using the action to resubmit unfinished segments (“核对任务后重新提交未完成片段…”), to avoid duplicate charges.
 
@@ -350,6 +366,22 @@ open 'build/Meeting Intelligence.app'
 
 本地转写始终开启。模型未就绪或转写失败时，录音仍会保存；资源准备完成后，可在历史会议中选择“继续本地转写”。转写语言随会议保存，更改设置主要影响之后的新会议。
 
+### 导入音频与发言人
+
+侧栏选择“导入音频…”可导入单个 WAV、M4A 或 MP3。核对文件名、时长、地域、“区分发言人”和自动摘要选项后，点击“开始导入并上传”。开始前需配置 Qwen Key。导入使用所选保存目录，无需本地模型，不请求录音／麦克风权限；应用保存独立 PCM 副本，删除或改名原文件不影响回放。取消会清理未发布临时文件。
+
+发言人区分采用 **120 分钟产品上限**，依据供应商建议设置。更长文件可明确关闭区分，但仍受普通文件上限（12 小时／2 GB）约束。不会截断或暗中拆成多个发言人任务。导入记录显示“导入于”，不推断会议日期；两版导入及云端能力相同。
+
+字幕显示发言人、来源、引擎；通过“管理发言人”改名，右键字幕可修正归属或设为“未区分”。修改仅保存在本机，使旧摘要过期。新一轮转写创建新身份，保留旧结果供显式恢复，会重新上传并可能重新计费。摘要和安全转义的 HTML／JSON／Markdown 共用解析后名称。不猜真实姓名，不建立跨会议声纹库。
+
+### 安全升级
+
+替换应用前退出旧版。数据与钥匙串位于应用包外；完整备份需复制当前、自定义及历史音频／字幕目录。替换后钥匙串拒绝访问时，在设置中使用“授权钥匙串访问”，原凭据不会删除。
+
+新会议使用磁盘 v2，旧 v1 可直接读取，浏览不迁移或重传。明确启用 v2 功能前，原始元数据和校验清单备份到 `~/Library/Application Support/Meeting Intelligence/Backups/`。设置提供备份位置和冲突检查恢复入口；备份不含音频。旧版不能打开 v2，降级需对应备份并单独保留后续编辑。损坏或离线记录单独提示。详见[格式兼容与恢复](docs/DATA-FORMAT-COMPATIBILITY.md)。
+
+只读 CLI 输出升级为 **schema_version 2**，含可空 chunk／session／speaker 字段和云端直转完成语义。调用方应通过 `meeting schema` 更新契约，磁盘 v1 仍可读取。
+
 ### 云端转写与会议摘要
 
 两项服务独立配置：云端转写接收音频，摘要服务接收转写文字。你可以只使用本地转写，也可以在本地转写完成后手动生成摘要。
@@ -360,9 +392,9 @@ open 'build/Meeting Intelligence.app'
 2. 选择北京或新加坡地域，通过界面入口前往百炼创建并保存 API Key。Key、业务空间和模型权限需属于同一地域；Workspace ID 可选。
 3. 在新录制页面勾选“本次录制使用云端转写”，停止录音后会提交云端任务。也可在历史会议详情中点击“云端转写”，为已有录音补做。
 
-应用使用 `qwen-audio-3.1-asr-flash-filetrans`，按音轨和片段分别上传，最多同时处理 3 个片段以缩短会后等待。每个片段成功后，用云端结果替换该片段的本地字幕，保留会议时间戳；失败片段保留已有文字。重新打开录制页面或结束录制后，本次云端开关会重置为关闭。
+应用使用 `qwen-audio-3.1-asr-flash-filetrans`。新任务默认开启发言人区分，每个来源构建一条保留开头静音及采集间隙的连续单声道音轨，最多两条来源任务并行。身份只在各任务内有效，同一个人在系统音频和麦克风中可能显示为两个条目。关闭区分时，录音沿用最多 3 个片段并发的精校路径。成功来源原子替换字幕，其他来源和失败时的本地结果保持可用。重新打开录制页面或结束录制后，本次云端开关会重置为关闭。
 
-“跳过整段静音”默认开启，只跳过整段接近零音量的片段；轻声、噪声和片段内的停顿仍可能上传。双轨分别计量，实际费用以百炼账单为准。
+“分片精校时跳过整段静音”默认开启，仅作用于分片精校；连续音轨任务保留所有静音。只跳过整段接近零音量的片段；轻声、噪声和片段内的停顿仍可能上传。双轨分别计量，实际费用以百炼账单为准。
 
 暂停转写会停止本机后续提交与查询，已被服务端接受的任务仍可能处理和计费。继续转写会复用已保存的任务 ID；遇到提交状态不确定时，请先核对百炼控制台，再使用“核对任务后重新提交未完成片段…”，以免重复计费。
 

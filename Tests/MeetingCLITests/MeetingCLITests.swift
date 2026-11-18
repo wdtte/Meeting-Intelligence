@@ -238,7 +238,9 @@ func transcriptValidationRejectsUnsupportedOrMismatchedData(kind: String) throws
     case "timestamp": fixture.document.segments[0].end = -1; code = "INVALID_TIMESTAMPS"
     default: code = "DATA_CORRUPT"
     }
-    try fixture.save()
+    if kind == "schema" || kind == "identity" {
+        try JSONEncoder().encode(fixture.document).write(to: fixture.transcript, options: .atomic)
+    } else { try fixture.save() }
     if kind == "corrupt" { try Data("bad".utf8).write(to: fixture.transcript) }
     #expect(try errorCode(fixture.run(["transcript", fixture.recording.id.uuidString], expected: 4)) == code)
 }
@@ -307,7 +309,8 @@ private func tree(_ root: URL) throws -> [String: Data] {
     let before = try tree(fixture.root)
     // SwiftPM's two build systems place products in different directories. Search alongside the running test binary first.
     let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    let candidates = [URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("meeting"),
+    let edition = ProcessInfo.processInfo.environment["MEETING_BUILD_EDITION"] ?? "standard"
+    let candidates = [repo.appendingPathComponent(".build/\(edition)/out/Products/Debug/meeting"), repo.appendingPathComponent(".build/\(edition)/debug/meeting"), URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("meeting"),
                       repo.appendingPathComponent(".build/debug/meeting"), repo.appendingPathComponent(".build/out/Products/Debug/meeting")]
     let executable = try #require(candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) })
     let commands: [([String], Int32)] = [(["list"], 0), (["show", fixture.recording.id.uuidString], 0),

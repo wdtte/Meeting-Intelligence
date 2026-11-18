@@ -24,6 +24,12 @@ npm ci --prefix scripts/dmg
 - Use synthetic audio, temporary directories, and mocked network services in tests. Do not record real meetings or call paid providers in routine checks.
 - Never commit API keys, signing credentials, recordings, transcripts, or build output. API keys belong in macOS Keychain.
 
+## Persistence changes
+
+- Disk v1/v2 remain readable; new meetings use v2. Only explicit use of a v2 feature migrates old data. Browsing must never migrate or resubmit tasks.
+- Persistence changes must update docs/DATA-FORMAT-COMPATIBILITY.md, synthetic historical fixtures, backup/journal recovery tests and release notes. Verify original-byte backups and commit/restore boundaries before incompatible writes. Never export Keychain secrets or describe metadata backups as full audio backups.
+- CLI output schema is v2 and stays read-only. Keep public DTO/schema fixtures synchronized with imported sources, nullable chunk/session/speaker fields and plan-aware completion.
+
 ## Automatic GitHub releases
 
 - Workflow: `.github/workflows/release.yml`. Pushing any tag to GitHub builds and publishes a Release for that tag. The Release workflow also supports manual dual-architecture validation on a branch without publishing. `.github/workflows/ci.yml` runs Swift/Rust tests for both editions on Intel for `main` pushes and pull requests, without release compilation or packaging.

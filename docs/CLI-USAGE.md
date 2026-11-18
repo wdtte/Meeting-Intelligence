@@ -129,3 +129,8 @@ meeting doctor
 ### 会议摘要
 
 `show`、列表和转写响应的 `summary_status` 为摘要状态（未生成时为 `null`，过期时为 `stale`）；不影响原有 `content_state` 转写完整性含义。`export` 的 JSON 快照新增 `summary`，包含 `text`、`model`、`provider`、`generated_at`；无有效摘要时为 `null`。Markdown 导出在字幕前包含会议摘要，失败、中断或过期时写明摘要状态。正文按文本转义，不执行模型返回的 HTML。CLI 保持只读，不联网、不读取模型 Key，也不触发摘要生成。
+
+
+## v0.3.0 契约更新
+
+CLI 输出 schema_version 为 "2"，同时读取磁盘 v1/v2。source 增加 imported，chunk_id 可空，字幕提供 session_id、speaker_id、speaker_name；元数据提供 origin、transcription_plan 和 cloud_session_count/cloud_completed_session_count。cloudOnly 的 local_status 为 not_requested，local_completion_ratio 为 null；require-complete 按持久化计划校验必要 session。命令保持只读，不导入、不上传、不迁移。名称与应用、摘要、HTML 一致；不输出远程 task ID、Key 标识或私有 URL。以 meeting schema 为准，迁移规则参见 DATA-FORMAT-COMPATIBILITY.md。

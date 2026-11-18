@@ -39,16 +39,24 @@ public struct SummaryRequest: Sendable {
     public var recordingID: UUID
     public var locale: String
     public var segments: [TranscriptSegment]
-    public init(recordingID: UUID, locale: String, segments: [TranscriptSegment]) { self.recordingID = recordingID; self.locale = locale; self.segments = segments }
+    public var speakers: [Speaker]
+    public var attributionFingerprint: String?
+    public init(recordingID: UUID, locale: String, segments: [TranscriptSegment], speakers: [Speaker] = [], attributionFingerprint: String? = nil) { self.recordingID = recordingID; self.locale = locale; self.segments = segments; self.speakers = speakers; self.attributionFingerprint = attributionFingerprint }
     public var text: String {
         segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .map { "[\(AudioTimeline.clock($0.start)) · \($0.source.label)] \($0.text)" }.joined(separator: "\n")
+            .map { segment in
+                let speaker = speakers.first { $0.id == segment.speakerID }?.name
+                let label = speaker.map { $0 + " · " } ?? ""
+                return "[\(AudioTimeline.clock(segment.start)) · \(label)\(segment.source.label)] \(segment.text)"
+            }.joined(separator: "\n")
     }
     /// Includes source, timestamps and language so edits invalidate an old summary.
     public var fingerprint: String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let data = (try? encoder.encode(Fingerprint(recordingID: recordingID, locale: locale, segments: segments))) ?? Data()
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        var payload = speakers.isEmpty ? data : data + Data(text.utf8)
+        if let attributionFingerprint { payload += Data(attributionFingerprint.utf8) }
+        return SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
     }
     private struct Fingerprint: Encodable { var recordingID: UUID; var locale: String; var segments: [TranscriptSegment] }
 }

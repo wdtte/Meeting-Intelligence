@@ -8,6 +8,15 @@ import UniformTypeIdentifiers
 @MainActor @Observable
 final class AppModel {
     enum State { case idle, preparing, recording, stopping }
+    var importPreview: AudioImportPreview?
+    var importURL: URL?
+    var importProgress: Double?
+    var importAutomaticSummary = true
+    var diarizationEnabled = UserDefaults.standard.object(forKey: "diarizationEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(diarizationEnabled, forKey: "diarizationEnabled") }
+    }
+    var importDiarizationEnabled = true
+    @ObservationIgnored private var importTask: Task<Void, Never>?
     enum Page { case meetings, settings }
     var page: Page = .meetings
     var storageSettings: StorageSettings?
@@ -180,6 +189,8 @@ final class AppModel {
         var configuration = CloudTranscriptionConfiguration(region: qwenRegion,
             workspaceID: qwenWorkspaceID.trimmingCharacters(in: .whitespacesAndNewlines), skipSilence: skipCloudSilence)
         configuration.provider = cloudProvider
+        configuration.diarizationEnabled = diarizationEnabled
+        configuration.strategy = diarizationEnabled ? .sourceSessions : .legacyChunks
         return configuration
     }
     func refreshCredentialStatus() {
@@ -279,7 +290,7 @@ final class AppModel {
         do { try transcription.resetUnfinishedCloudJobs(recording, store: source) }
         catch { errorMessage = error.localizedDescription }
     }
-    var modelStatus = "正在检查本地转写资源…"
+    var modelStatus = "录制或本地转写时准备语音资源；音频导入无需本地模型。"
     var modelPreparing = false
     var microphonePeak: Float = 0
     var microphoneLastAudioAt: TimeInterval?
@@ -307,15 +318,24 @@ final class AppModel {
         modelPreparing = false
     }
     func transcribeSelected(useCloud: Bool = false) {
-        guard !isBusy, deletingRecordingID == nil, var recording = selectedRecording, let source = recordingStores[recording.id], let settings = storageSettings else { return }
+        guard !isBusy, deletingRecordingID == nil, !transcription.running.contains(selectedID ?? UUID()), !transcription.summaryRunning.contains(selectedID ?? UUID()), var recording = selectedRecording, let source = recordingStores[recording.id], let settings = storageSettings else { return }
         do {
+            if recording.schemaVersion == 1, useCloud, diarizationEnabled {
+                guard let settingsStore else { throw MeetingError.message("数据目录未就绪。") }
+                guard confirmFormatUpgrade(base: settingsStore.base) else { return }
+                _ = try DataMigration(base: settingsStore.base).upgrade(manifest: source.directory(for: recording.id).appendingPathComponent("recording.json"), transcript: recording.transcriptPath.map { URL(fileURLWithPath: $0) })
+                recording.schemaVersion = 2
+                try reload()
+            }
             if recording.transcriptPath == nil {
                 recording.transcriptPath = settings.transcriptDirectory.appendingPathComponent("\(recording.id).json").path
                 recording.transcriptionLocale = transcriptionLocale
                 try source.save(recording); try reload()
             }
             if useCloud, recording.cloudTranscription == nil {
-                recording.cloudTranscription = try validatedCloudConfiguration()
+                var configuration = try validatedCloudConfiguration()
+                if recording.schemaVersion == 1 { configuration.diarizationEnabled = false; configuration.strategy = .legacyChunks }
+                recording.cloudTranscription = configuration
                 try source.save(recording); try reload()
             }
             transcription.submit(recording, store: source, retry: true)
@@ -365,12 +385,13 @@ final class AppModel {
         return true
     }
     @ObservationIgnored var store: RecordingStore?
+    @ObservationIgnored private var writerLease: LibraryWriterLease?
     @ObservationIgnored private var settingsStore: StorageSettingsStore?
     @ObservationIgnored private var recordingStores: [UUID: RecordingStore] = [:]
     @ObservationIgnored private let capture = ProcessAudioCapture()
     @ObservationIgnored private var startedAt: TimeInterval = 0
     @ObservationIgnored private var ticker: Task<Void, Never>?
-    var isBusy: Bool { state != .idle }
+    var isBusy: Bool { state != .idle || importProgress != nil }
     var selectedRecording: Recording? { recordings.first { $0.id == selectedID } }
     var showsPlaybackBar: Bool { !isBusy && page == .meetings && selectedRecording != nil }
     var playbackRecording: Recording? {
@@ -384,10 +405,13 @@ final class AppModel {
     }
     init(settingsStore: StorageSettingsStore? = nil, startBackgroundServices: Bool = true) {
         do {
-            let settingsStore = try settingsStore ?? StorageSettingsStore.applicationStore()
+            let configuredBase = ProcessInfo.processInfo.environment["MEETING_DATA_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            let settingsStore = try settingsStore ?? configuredBase.map { try StorageSettingsStore(base: $0) } ?? StorageSettingsStore.applicationStore()
             self.settingsStore = settingsStore
+            writerLease = try LibraryWriterLease(base: settingsStore.base)
             let settings = try settingsStore.load()
             storageSettings = settings
+            try DataMigration(base: settingsStore.base).recover()
             store = try RecordingStore(root: settings.audioDirectory)
             try reload(recover: true)
         }
@@ -395,7 +419,6 @@ final class AppModel {
         guard startBackgroundServices else { return }
         refreshCredentialStatus()
         refreshSummaryCredentialStatus()
-        Task { [weak self] in await self?.prepareSpeechModel() }
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(100))
@@ -422,7 +445,10 @@ final class AppModel {
                     throw MeetingError.message("目录不可用：\(root.path)")
                 }
                 let source = try RecordingStore(root: root)
-                for recording in try source.loadAll(recover: recover) {
+                if recover { historyWarnings.append(contentsOf: try AudioImporter.recover(store: source)) }
+                let catalog = try source.loadCatalog(recover: recover)
+                historyWarnings.append(contentsOf: catalog.warnings)
+                for recording in catalog.recordings {
                     combined[recording.id] = recording
                     sources[recording.id] = source
                 }
@@ -465,6 +491,7 @@ final class AppModel {
             do { recording.cloudTranscription = try validatedCloudConfiguration() }
             catch { state = .idle; errorMessage = error.localizedDescription; return }
         }
+        recording.origin = .recorded; recording.transcriptionPlan = .localThenCloud
         activeRecordingID = recording.id; captureName = AudioSource.application.label
         recoveringAudioDevice = false
         elapsed = 0; savedDuration = 0; peak = 0; lastAudioAt = nil
@@ -554,4 +581,90 @@ final class AppModel {
         } catch { errorMessage = error.localizedDescription }
     }
     func revealRecordings() { revealDirectory(store?.root) }
+    func chooseAudioImport() {
+        guard !isBusy, deletingRecordingID == nil, libraryError == nil else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.wav, .mpeg4Audio, .mp3]
+        panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        panel.message = "选择音频。确认后上传至当前地域的 Qwen 云端转写。"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { importPreview = try AudioImporter.inspect(url); importURL = url; importDiarizationEnabled = true }
+        catch { errorMessage = error.localizedDescription }
+    }
+    func startAudioImport() {
+        guard let url = importURL, let store, let settings = storageSettings, !isBusy else { return }
+        do {
+            var configuration = try validatedCloudConfiguration()
+            configuration.diarizationEnabled = importDiarizationEnabled; configuration.strategy = .sourceSessions
+            try CloudAudioLimits.validate(duration: importPreview?.duration ?? 0, diarization: importDiarizationEnabled)
+            let config = configuration, locale = transcriptionLocale, summary = importAutomaticSummary
+            importPreview = nil; importURL = nil; importProgress = 0; playback.pause()
+            importTask = Task { [weak self] in
+                guard let self else { return }
+                defer { self.importProgress = nil; self.importTask = nil }
+                do {
+                    let recording = try await AudioImporter.run(url: url, store: store, transcriptDirectory: settings.transcriptDirectory,
+                        configuration: config, locale: locale, automaticSummary: summary) { [weak self] progress in
+                            await self?.setImportProgress(progress)
+                        }
+                    try self.reload(); self.selectedID = recording.id; self.page = .meetings
+                    self.transcription.load(recording)
+                    self.transcription.submit(recording, store: store)
+                } catch { if !(error is CancellationError) { self.errorMessage = "导入失败：\(error.localizedDescription)" } }
+            }
+        } catch { errorMessage = error.localizedDescription }
+    }
+    private func setImportProgress(_ progress: Double) { if importProgress != nil { importProgress = max(importProgress ?? 0, progress) } }
+    func cancelAudioImport() { importTask?.cancel() }
+    func editSpeaker(_ id: UUID, name: String, recordingID: UUID) {
+        guard let recording = recordings.first(where: { $0.id == recordingID }) else { return }
+        do { try transcription.editSpeakers(recording) { try $0.renameSpeaker(id, name: name) } }
+        catch { errorMessage = error.localizedDescription }
+    }
+    func assignSpeaker(_ speakerID: UUID?, segmentID: UUID, recordingID: UUID) {
+        guard let recording = recordings.first(where: { $0.id == recordingID }) else { return }
+        do { try transcription.editSpeakers(recording) { try $0.assignSpeaker(segmentID: segmentID, speakerID: speakerID) } }
+        catch { errorMessage = error.localizedDescription }
+    }
+    func retranscribeWithSpeakers() {
+        guard !isBusy, var recording = selectedRecording, !transcription.running.contains(recording.id), !transcription.summaryRunning.contains(recording.id), let source = recordingStores[recording.id], let settingsStore else { return }
+        do {
+            var configuration = try validatedCloudConfiguration()
+            configuration.diarizationEnabled = diarizationEnabled
+            configuration.strategy = recording.effectivePlan == .cloudOnly || diarizationEnabled ? .sourceSessions : .legacyChunks
+            try CloudAudioLimits.validate(duration: recording.duration, diarization: diarizationEnabled)
+            if recording.schemaVersion == 1 {
+                guard confirmFormatUpgrade(base: settingsStore.base) else { return }
+                _ = try DataMigration(base: settingsStore.base).upgrade(manifest: source.directory(for: recording.id).appendingPathComponent("recording.json"), transcript: recording.transcriptPath.map { URL(fileURLWithPath: $0) })
+                recording.schemaVersion = 2; try reload()
+            }
+            recording.cloudTranscription = configuration; try source.save(recording)
+            transcription.load(recording)
+            try transcription.beginNewSessionRun(recording, configuration: configuration)
+            try reload(); transcription.submit(recording, store: source, retry: true)
+        } catch { errorMessage = error.localizedDescription }
+    }
+    func restorePreviousTranscription() {
+        guard let recording = selectedRecording else { return }
+        do { try transcription.restorePreviousRun(recording) }
+        catch { errorMessage = error.localizedDescription }
+    }
+    private func confirmFormatUpgrade(base: URL) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "备份并升级此会议到格式 v2？"
+        alert.informativeText = "旧版应用不能打开 v2。原始元数据将备份到 \(base.appendingPathComponent("Backups").path)，备份不含音频。降级需显式恢复备份并处理之后的编辑；仅浏览不会迁移。"
+        alert.addButton(withTitle: "备份并升级"); alert.addButton(withTitle: "取消")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+    func revealBackups() { revealDirectory(settingsStore?.base.appendingPathComponent("Backups")) }
+    func restoreMetadataBackup() {
+        guard !isBusy, transcription.running.isEmpty, transcription.summaryRunning.isEmpty, let settingsStore else { return }
+        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.directoryURL = settingsStore.base.appendingPathComponent("Backups")
+        panel.message = "恢复迁移前元数据。备份后的编辑会触发冲突并阻止覆盖；音频不在备份内。"
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        do { try DataMigration(base: settingsStore.base).restore(folder: folder); try reload() }
+        catch { errorMessage = error.localizedDescription }
+    }
+
 }

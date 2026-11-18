@@ -41,7 +41,7 @@ public struct MeetingReadSnapshot: Sendable {
     public let transcriptURL: URL
     public let revision: String
     public var meetingID: UUID { recording?.id ?? transcript!.recordingID }
-    public var segments: [TranscriptSegment] { (transcript?.segments ?? []).sorted(by: MeetingQuery.segmentOrder) }
+    public var segments: [TranscriptSegment] { (transcript?.resolvedSegments ?? []).sorted(by: MeetingQuery.segmentOrder) }
     public var closedChunkCount: Int? { recording.map { $0.chunks.filter(\.isComplete).count } }
     public var processedChunkCount: Int? {
         recording.map { recording in recording.chunks.filter { $0.isComplete && (transcript?.processedChunks.contains($0.id) ?? false) }.count }
@@ -49,13 +49,18 @@ public struct MeetingReadSnapshot: Sendable {
     public var cloudEnabled: Bool { recording?.cloudTranscription != nil || transcript?.cloud != nil }
     public var contentState: String {
         guard let document = transcript else { return "unavailable" }
-        let known = ["pending", "running", "completed", "failed", "interrupted"]
+        let known = ["pending", "running", "completed", "failed", "interrupted", "not_requested"]
         guard known.contains(document.status), !cloudEnabled || known.contains(document.cloud?.status ?? "pending") else { return "unknown" }
-        guard document.status == "completed", recording?.status != .recording,
-              closedChunkCount == nil || closedChunkCount == processedChunkCount,
+        guard (recording?.effectivePlan == .cloudOnly || document.status == "completed"), recording?.status != .recording,
+              recording?.effectivePlan == .cloudOnly || closedChunkCount == nil || closedChunkCount == processedChunkCount,
               recording?.chunks.allSatisfy(\.isComplete) ?? true else { return "partial" }
         if cloudEnabled {
             guard let cloud = document.cloud, cloud.status == "completed" else { return "partial" }
+            if cloud.configuration.usesSessions {
+                guard let sessions = cloud.sessions, !sessions.isEmpty, sessions.allSatisfy({ $0.status == "completed" }),
+                      recording.map({ Set($0.chunks.filter(\.isComplete).map(\.id)) == Set(sessions.flatMap(\.chunkIDs)) }) ?? true else { return "partial" }
+                return "complete"
+            }
             if let recording, !recording.chunks.filter(\.isComplete).allSatisfy({ cloud.jobs[$0.id.uuidString]?.completed == true }) {
                 return "partial"
             }
@@ -104,10 +109,12 @@ public struct MeetingReadRepository: Sendable {
 
     public init(base: URL) throws {
         self.base = base.standardizedFileURL.resolvingSymlinksInPath()
+        try DataMigration.assertReadable(base: self.base)
         let config = self.base.appendingPathComponent("settings.json")
         let bytes = try Self.read(config, optional: true)
         settingsBytes = bytes; settingsPresent = bytes != nil
         if let bytes {
+            try StorageSettingsStore.checkVersion(bytes)
             do { settings = try JSONDecoder().decode(StorageSettings.self, from: bytes) }
             catch { throw MeetingReadError("INVALID_SETTINGS", "无法解析配置：\(config.path)") }
             guard settings.audioDirectory.isFileURL, settings.transcriptDirectory.isFileURL,
@@ -184,6 +191,7 @@ public struct MeetingReadRepository: Sendable {
     }
 
     public func snapshot(entry: MeetingReadEntry) throws -> MeetingReadSnapshot {
+        try DataMigration.assertReadable(base: base)
         for _ in 0..<3 {
             let manifest = try Self.read(entry.manifestURL)!
             let recording = try Self.decodeRecording(manifest, expectedID: entry.recording.id)
@@ -192,6 +200,7 @@ public struct MeetingReadRepository: Sendable {
             let manifestAfter = try Self.read(entry.manifestURL, optional: true)
             let transcriptAfter = try Self.read(url, optional: true)
             guard manifest == manifestAfter, transcript == transcriptAfter else { continue }
+            try DataMigration.assertReadable(base: base)
             let document = try transcript.map { try Self.decodeTranscript($0, expectedID: recording.id) }
             return .init(recording: recording, transcript: document, transcriptURL: url,
                          revision: MeetingFingerprint.digest([manifest, transcript]))
@@ -263,11 +272,7 @@ public struct MeetingReadRepository: Sendable {
         throw changing
     }
     private static func checkSchema(_ bytes: Data) throws {
-        guard let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
-              let version = object["schemaVersion"] as? Int else {
-            throw MeetingReadError("DATA_CORRUPT", "JSON 缺少有效 schemaVersion。")
-        }
-        guard version == 1 else { throw MeetingReadError("UNSUPPORTED_SCHEMA", "不支持磁盘 schemaVersion：\(version)。") }
+        _ = try DiskFormat.version(bytes)
     }
     private static func decodeRecording(_ bytes: Data, expectedID: UUID) throws -> Recording {
         try checkSchema(bytes)
