@@ -335,6 +335,7 @@ final class AppModel {
             if useCloud, recording.cloudTranscription == nil {
                 var configuration = try validatedCloudConfiguration()
                 if recording.schemaVersion == 1 { configuration.diarizationEnabled = false; configuration.strategy = .legacyChunks }
+                if recording.importMetadata?.format == "html" { configuration.strategy = .sourceSessions }
                 recording.cloudTranscription = configuration
                 try source.save(recording); try reload()
             }
@@ -584,32 +585,54 @@ final class AppModel {
     func chooseAudioImport() {
         guard !isBusy, deletingRecordingID == nil, libraryError == nil else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.wav, .mpeg4Audio, .mp3]
+        panel.allowedContentTypes = [.wav, .mpeg4Audio, .mp3, .html]
         panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
-        panel.message = "选择音频。确认后上传至当前地域的 Qwen 云端转写。"
+        panel.message = "选择音频以云端转写，或选择本应用导出的 HTML 以恢复已有音频、字幕和摘要。"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { importPreview = try AudioImporter.inspect(url); importURL = url; importDiarizationEnabled = true }
-        catch { errorMessage = error.localizedDescription }
+        importProgress = 0
+        importTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.importProgress = nil; self.importTask = nil }
+            do {
+                let preview: AudioImportPreview
+                if MeetingHTMLImporter.accepts(url) { preview = try await MeetingHTMLImporter.inspect(url) }
+                else { preview = try await Task.detached(priority: .utility) { try AudioImporter.inspect(url) }.value }
+                try Task.checkCancellation()
+                self.importURL = url; self.importPreview = preview; self.importDiarizationEnabled = true
+            } catch { if !(error is CancellationError) { self.errorMessage = error.localizedDescription } }
+        }
     }
     func startAudioImport() {
         guard let url = importURL, let store, let settings = storageSettings, !isBusy else { return }
         do {
-            var configuration = try validatedCloudConfiguration()
-            configuration.diarizationEnabled = importDiarizationEnabled; configuration.strategy = .sourceSessions
-            try CloudAudioLimits.validate(duration: importPreview?.duration ?? 0, diarization: importDiarizationEnabled)
+            let isHTML = MeetingHTMLImporter.accepts(url)
+            var configuration: CloudTranscriptionConfiguration?
+            if !isHTML {
+                var config = try validatedCloudConfiguration()
+                config.diarizationEnabled = importDiarizationEnabled; config.strategy = .sourceSessions
+                try CloudAudioLimits.validate(duration: importPreview?.duration ?? 0, diarization: importDiarizationEnabled)
+                configuration = config
+            }
             let config = configuration, locale = transcriptionLocale, summary = importAutomaticSummary
             importPreview = nil; importURL = nil; importProgress = 0; playback.pause()
             importTask = Task { [weak self] in
                 guard let self else { return }
                 defer { self.importProgress = nil; self.importTask = nil }
                 do {
-                    let recording = try await AudioImporter.run(url: url, store: store, transcriptDirectory: settings.transcriptDirectory,
-                        configuration: config, locale: locale, automaticSummary: summary) { [weak self] progress in
+                    let recording: Recording
+                    if isHTML {
+                        recording = try await MeetingHTMLImporter.run(url: url, store: store, transcriptDirectory: settings.transcriptDirectory) { [weak self] progress in
                             await self?.setImportProgress(progress)
                         }
+                    } else if let config {
+                        recording = try await AudioImporter.run(url: url, store: store, transcriptDirectory: settings.transcriptDirectory,
+                            configuration: config, locale: locale, automaticSummary: summary) { [weak self] progress in
+                                await self?.setImportProgress(progress)
+                            }
+                    } else { return }
                     try self.reload(); self.selectedID = recording.id; self.page = .meetings
                     self.transcription.load(recording)
-                    self.transcription.submit(recording, store: store)
+                    if !isHTML { self.transcription.submit(recording, store: store) }
                 } catch { if !(error is CancellationError) { self.errorMessage = "导入失败：\(error.localizedDescription)" } }
             }
         } catch { errorMessage = error.localizedDescription }
@@ -631,7 +654,7 @@ final class AppModel {
         do {
             var configuration = try validatedCloudConfiguration()
             configuration.diarizationEnabled = diarizationEnabled
-            configuration.strategy = recording.effectivePlan == .cloudOnly || diarizationEnabled ? .sourceSessions : .legacyChunks
+            configuration.strategy = recording.effectivePlan == .cloudOnly || recording.importMetadata?.format == "html" || diarizationEnabled ? .sourceSessions : .legacyChunks
             try CloudAudioLimits.validate(duration: recording.duration, diarization: diarizationEnabled)
             if recording.schemaVersion == 1 {
                 guard confirmFormatUpgrade(base: settingsStore.base) else { return }

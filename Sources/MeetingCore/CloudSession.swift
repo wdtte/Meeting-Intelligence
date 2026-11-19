@@ -74,7 +74,7 @@ public extension TranscriptDocument {
             unassignedSegments?.insert(segmentID)
         }
     }
-    mutating func commitSessionResult(_ result: ProviderTranscription, session: CloudTranscriptionSession) throws {
+    mutating func commitSessionResult(_ result: ProviderTranscription, session: CloudTranscriptionSession, replacingImportedSnapshot: Bool = false) throws {
         guard schemaVersion == 2, session.timelineOrigin == 0, session.duration.isFinite, session.duration > 0,
               let saved = cloud?.sessions?.first(where: { $0.id == session.id }),
               saved.inputFingerprint == session.inputFingerprint, saved.runID == session.runID, saved.source == session.source,
@@ -90,7 +90,7 @@ public extension TranscriptDocument {
         if cloud?.sessions?[index].status == "completed" { return }
         if result.noSpeechRecognized {
             // Kept local fallback must never imply diarization from an earlier cloud run.
-            for index in segments.indices where segments[index].source == session.source {
+            for index in segments.indices where replacingImportedSnapshot || segments[index].source == session.source {
                 segments[index].speakerID = nil
                 speakerOverrides?.removeValue(forKey: segments[index].id.uuidString)
             }
@@ -107,7 +107,7 @@ public extension TranscriptDocument {
                 }
                 replacement.append(value)
             }
-            let removed = Set(segments.filter { $0.source == session.source && ($0.sessionID == session.id || $0.start < session.duration) }.map(\.id))
+            let removed = Set(segments.filter { replacingImportedSnapshot || ($0.source == session.source && ($0.sessionID == session.id || $0.start < session.duration)) }.map(\.id))
             segments.removeAll { removed.contains($0.id) }
             speakerOverrides = speakerOverrides?.filter { key, _ in UUID(uuidString: key).map { !removed.contains($0) } ?? false }
             unassignedSegments?.subtract(removed)

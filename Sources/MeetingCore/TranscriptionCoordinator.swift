@@ -70,6 +70,12 @@ public final class TranscriptionCoordinator {
     }
     public func submit(_ recording: Recording, store: RecordingStore, retry: Bool = false) {
         guard let path = recording.transcriptPath else { return }
+        // An HTML snapshot has no local ASR work, including when its source export was partial.
+        // Explicit cloud transcription still uses the normal configured path below.
+        if recording.importMetadata?.format == "html", recording.cloudTranscription == nil {
+            if documents[recording.id] == nil { load(recording) }
+            return
+        }
         if recording.effectivePlan == .cloudOnly {
             if retry { paused.remove(recording.id) }
             guard !paused.contains(recording.id), tasks[recording.id] == nil, cloudTasks[recording.id] == nil else { return }
@@ -312,7 +318,7 @@ public final class TranscriptionCoordinator {
             try Task.checkCancellation()
             guard var latest = documents[recording.id] else { throw CancellationError() }
             guard !result.segments.isEmpty || result.noSpeechRecognized else { throw MeetingError.message("云端未返回句级结果或明确的无语音状态。") }
-            try latest.commitSessionResult(result, session: session)
+            try latest.commitSessionResult(result, session: session, replacingImportedSnapshot: recording.importMetadata?.format == "html")
             try latest.save(to: url); documents[recording.id] = latest
         } catch {
             try update { $0.status = error is CancellationError || $0.checkpoint?.phase == .submitted ? "interrupted" : "failed"; $0.error = error is CancellationError ? "已停止本机等待，远程任务可能继续运行和计费。" : error.localizedDescription }

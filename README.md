@@ -78,7 +78,9 @@ Local transcription is always enabled. Audio is still saved if speech resources 
 
 ### Import audio and manage speakers
 
-Choose Import Audio (“导入音频…”) in the sidebar for one WAV, M4A or MP3. Review the filename, duration, cloud region, speaker option and automatic-summary option, then select Start Import and Upload. A Qwen key is required before starting. Import uses your chosen storage folders, requires no local speech model or recording/microphone permission, and saves independent PCM audio. Deleting or renaming the source does not break playback. Cancel removes unpublished staging.
+Choose Import (“导入…”) in the sidebar for one WAV, M4A or MP3. Review the filename, duration, cloud region, speaker option and automatic-summary option, then select Start Import and Upload. A Qwen key is required before starting. Import uses your chosen storage folders, requires no local speech model or recording/microphone permission, and saves independent PCM audio. Deleting or renaming the source does not break playback. Cancel removes unpublished staging.
+
+The same Import entry accepts Meeting Intelligence HTML exports (`.html`/`.htm`), including older exports. Preview the title, embedded-audio presence, segment count and summary, then select Start Import. Existing transcript timestamps, sources, speaker names and summary are restored without an API key, upload or local ASR. Embedded audio becomes an independent PCM copy; transcript-only HTML remains readable without playback. Partial exports stay marked partial. Only embedded WAV/M4A/MP3 audio is accepted; scripts are not executed and external audio URLs are not fetched. HTML is limited to 512 MiB, with at most 8 MiB of markup/text. Earlier HTML files lack explicit speaker IDs, so matching source/name pairs are grouped together; new exports preserve distinct identities even when names match.
 
 Diarization has a **120-minute product limit**, following the provider recommendation. Disable it explicitly for longer files; normal limits still apply (12 hours / 2 GB). Audio is never silently truncated or split into multiple speaker tasks. Imported meetings show the import date. Both editions provide the same import/cloud features.
 
@@ -368,7 +370,9 @@ open 'build/Meeting Intelligence.app'
 
 ### 导入音频与发言人
 
-侧栏选择“导入音频…”可导入单个 WAV、M4A 或 MP3。核对文件名、时长、地域、“区分发言人”和自动摘要选项后，点击“开始导入并上传”。开始前需配置 Qwen Key。导入使用所选保存目录，无需本地模型，不请求录音／麦克风权限；应用保存独立 PCM 副本，删除或改名原文件不影响回放。取消会清理未发布临时文件。
+侧栏选择“导入…”可导入单个 WAV、M4A 或 MP3。核对文件名、时长、地域、“区分发言人”和自动摘要选项后，点击“开始导入并上传”。开始前需配置 Qwen Key。导入使用所选保存目录，无需本地模型，不请求录音／麦克风权限；应用保存独立 PCM 副本，删除或改名原文件不影响回放。取消会清理未发布临时文件。
+
+同一“导入…”入口也支持 Meeting Intelligence 导出的 HTML（`.html`／`.htm`），兼容旧版导出。预览标题、内嵌音频、字幕段数及摘要后，点击“开始导入”即可恢复已有字幕时间、来源、发言人名称和摘要，无需 API Key，不上传、不运行本地识别。内嵌音频保存为独立 PCM 副本；纯转写 HTML 可阅读但不能回放。未完成的导出仍标记为部分内容。仅接受内嵌 WAV／M4A／MP3，不执行脚本、不读取外部音频链接；HTML 上限 512 MiB，其中文字及页面结构上限 8 MiB。旧版 HTML 没有显式发言人 ID，按来源和名称合并；新版导出可保留同名发言人的独立身份。
 
 发言人区分采用 **120 分钟产品上限**，依据供应商建议设置。更长文件可明确关闭区分，但仍受普通文件上限（12 小时／2 GB）约束。不会截断或暗中拆成多个发言人任务。导入记录显示“导入于”，不推断会议日期；两版导入及云端能力相同。
 

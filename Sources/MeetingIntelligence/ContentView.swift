@@ -17,7 +17,7 @@ struct ContentView: View {
                     Label("新录制", systemImage: "plus").frame(maxWidth: .infinity).padding(.vertical, 10)
                 }.buttonStyle(MonochromeButtonStyle()).padding(.horizontal, 18).disabled(model.isBusy)
                 Button { model.chooseAudioImport() } label: {
-                    Label("导入音频…", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity)
+                    Label("导入…", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity)
                 }.padding(.horizontal, 18).disabled(model.isBusy || model.deletingRecordingID != nil || model.libraryError != nil)
                 VStack(alignment: .leading, spacing: 8) {
                     Text("最近会议").font(.caption.weight(.medium)).foregroundStyle(.secondary)
@@ -90,7 +90,7 @@ struct ContentView: View {
                     Group {
                         if let progress = model.importProgress {
                             VStack(spacing: 16) {
-                                Text("正在导入音频…").font(.title2)
+                                Text("正在读取导入文件…").font(.title2)
                                 ProgressView(value: progress).frame(width: 320)
                                 Text(progress < 0.8 ? "正在解码并规范化音轨" : "正在保存 PCM 分片").foregroundStyle(.secondary)
                                 Button("取消导入") { model.cancelAudioImport() }
@@ -126,16 +126,26 @@ struct ContentView: View {
         }
         .sheet(isPresented: Binding(get: { model.importPreview != nil }, set: { if !$0 { model.importPreview = nil; model.importURL = nil } })) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("导入音频并转写").font(.title2)
+                Text(model.importPreview?.isHTML == true ? "导入会议 HTML" : "导入音频并转写").font(.title2)
                 Text(model.importPreview?.fileName ?? "")
-                Text("时长 \(AudioTimeline.clock(model.importPreview?.duration ?? 0)) · Qwen \(model.qwenRegion.label)")
-                Toggle("区分发言人", isOn: $model.importDiarizationEnabled)
-                Toggle("转写后生成摘要（需已配置摘要服务）", isOn: $model.importAutomaticSummary)
-                Text("开始后会上传音频到所选地域。导入不需要本地语音模型，不请求录音权限。区分发言人最多 120 分钟。").font(.caption).foregroundStyle(.secondary)
+                if let preview = model.importPreview, preview.isHTML {
+                    Text(preview.title ?? "")
+                    Text("\(preview.hasAudio ? "内嵌音频 · " : "无音频 · ")\(preview.segmentCount) 段字幕\(preview.hasSummary ? " · 含摘要" : "")")
+                    Text("时间范围 \(AudioTimeline.clock(preview.duration))")
+                    if !preview.isComplete {
+                        Text("原文件的转写尚未完成，仅恢复导出时已有内容。").foregroundStyle(.orange)
+                    }
+                    Text("直接恢复已有内容，无需 API Key。音频保存为独立副本；不上传或重新转写。").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("时长 \(AudioTimeline.clock(model.importPreview?.duration ?? 0)) · Qwen \(model.qwenRegion.label)")
+                    Toggle("区分发言人", isOn: $model.importDiarizationEnabled)
+                    Toggle("转写后生成摘要（需已配置摘要服务）", isOn: $model.importAutomaticSummary)
+                    Text("开始后会上传音频到所选地域。导入不需要本地语音模型，不请求录音权限。区分发言人最多 120 分钟。").font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("取消") { model.importPreview = nil; model.importURL = nil }
                     Spacer()
-                    Button("开始导入并上传") { model.startAudioImport() }.buttonStyle(.borderedProminent)
+                    Button(model.importPreview?.isHTML == true ? "开始导入" : "开始导入并上传") { model.startAudioImport() }.buttonStyle(.borderedProminent)
                 }
             }.padding(28).frame(width: 460)
         }
