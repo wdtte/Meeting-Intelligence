@@ -88,6 +88,12 @@ public struct AudioImportPreview: Sendable {
     public var fileName: String
     public var duration: Double
     public var format: String
+    public var isHTML = false
+    public var hasAudio = true
+    public var segmentCount = 0
+    public var hasSummary = false
+    public var title: String? = nil
+    public var isComplete = true
 }
 public enum AudioImporter {
     /// Discard only app-owned, unpublished staging. Published directories finish the pending transcript.
@@ -144,8 +150,7 @@ public enum AudioImporter {
     private static func perform(url: URL, store: RecordingStore, transcriptDirectory: URL, configuration: CloudTranscriptionConfiguration, locale: String, automaticSummary: Bool, progress: @escaping @Sendable (Double) async -> Void) async throws -> Recording {
         let preview = try inspect(url)
         try configuration.validate(); try CloudAudioLimits.validate(duration: preview.duration, diarization: configuration.diarizationEnabled == true)
-        let capacity = try store.root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage ?? 0
-        guard capacity > Int64(preview.duration * 64000) + 16_777_216 else { throw MeetingError.message("导入目录可用空间不足。") }
+        try validateCapacity(store: store, duration: preview.duration)
         var config = configuration; config.strategy = .sourceSessions
         var recording = Recording(title: url.deletingPathExtension().lastPathComponent, applicationName: "导入音频", bundleIdentifier: "")
         recording.origin = .imported; recording.transcriptionPlan = .cloudOnly; recording.cloudTranscription = config
@@ -153,8 +158,21 @@ public enum AudioImporter {
         recording.transcriptPath = transcriptDirectory.appendingPathComponent("\(recording.id).json").path
         let stage = store.root.appendingPathComponent(".import-\(recording.id)", isDirectory: true)
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        var published = false
-        defer { if !published { try? FileManager.default.removeItem(at: stage) } }
+        defer { try? FileManager.default.removeItem(at: stage) }
+        recording.chunks = try await stageAudio(url: url, duration: preview.duration, stage: stage, progress: progress)
+        recording.status = .completed; recording.endedAt = Date()
+        recording.importMetadata = AudioImportMetadata(originalFileName: preview.fileName, importedAt: recording.startedAt, format: preview.format, duration: recording.duration)
+        var document = TranscriptDocument(recordingID: recording.id, locale: locale); document.status = "not_requested"
+        document.cloud = CloudTranscriptionProgress(configuration: config)
+        try publish(recording: recording, document: document, stage: stage, store: store)
+        return recording
+    }
+    static func validateCapacity(store: RecordingStore, duration: Double) throws {
+        let capacity = try store.root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage ?? 0
+        guard capacity > Int64(duration * 64000) + 16_777_216 else { throw MeetingError.message("导入目录可用空间不足。") }
+    }
+    static func stageAudio(url: URL, duration: Double, stage: URL, progress: @escaping @Sendable (Double) async -> Void) async throws -> [AudioChunk] {
+        var chunks: [AudioChunk] = []
         await progress(0)
         // One continuous converter is used for the entire source, before splitting its PCM frames.
         let prepared = try await CloudAudioPreparation.prepare(url: url, skipSilence: false) { await progress($0 * 0.8) }
@@ -167,17 +185,16 @@ public enum AudioImporter {
             try Task.checkCancellation()
             try input.read(into: buffer)
             guard buffer.frameLength > 0 else { throw MeetingError.message("音频解码提前结束。") }
-            let name = "import-\(recording.chunks.count).wav"
+            let name = "import-\(chunks.count).wav"
             do { let output = try CloudSessionAudioBuilder.pcmFile(stage.appendingPathComponent(name)); try output.write(from: buffer) }
-            recording.chunks.append(AudioChunk(source: .imported, fileName: name, offset: Double(frames) / 16000, duration: Double(buffer.frameLength) / 16000, sampleRate: 16000, channels: 1, isComplete: true))
+            chunks.append(AudioChunk(source: .imported, fileName: name, offset: Double(frames) / 16000, duration: Double(buffer.frameLength) / 16000, sampleRate: 16000, channels: 1, isComplete: true))
             frames += Int64(buffer.frameLength)
             await progress(0.8 + Double(frames) / Double(input.length) * 0.2)
         }
-        guard abs(Double(frames) / 16000 - preview.duration) <= 0.02 else { throw MeetingError.message("导入音频时长校验失败。") }
-        recording.status = .completed; recording.endedAt = Date()
-        recording.importMetadata = AudioImportMetadata(originalFileName: preview.fileName, importedAt: recording.startedAt, format: preview.format, duration: recording.duration)
-        var document = TranscriptDocument(recordingID: recording.id, locale: locale); document.status = "not_requested"
-        document.cloud = CloudTranscriptionProgress(configuration: config)
+        guard abs(Double(frames) / 16000 - duration) <= 0.02 else { throw MeetingError.message("导入音频时长校验失败。") }
+        return chunks
+    }
+    static func publish(recording: Recording, document: TranscriptDocument, stage: URL, store: RecordingStore) throws {
         // Transcript is committed first; the final same-volume directory rename publishes the meeting.
         // The staging journal allows recovery if publication stops between volumes.
         try DiskFormat.encode(recording).write(to: stage.appendingPathComponent("recording.json"), options: .atomic)
@@ -186,8 +203,6 @@ public enum AudioImporter {
         try document.save(to: URL(fileURLWithPath: recording.transcriptPath!))
         do { try FileManager.default.moveItem(at: stage, to: store.directory(for: recording.id)) }
         catch { try? FileManager.default.removeItem(at: URL(fileURLWithPath: recording.transcriptPath!)); throw error }
-        published = true
         try? FileManager.default.removeItem(at: store.directory(for: recording.id).appendingPathComponent("transcript.pending"))
-        return recording
     }
 }

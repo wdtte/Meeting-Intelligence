@@ -87,6 +87,8 @@ enum TranscriptHTMLWriter {
         let completed = MeetingReadSnapshot(recording: recording, transcript: transcript, transcriptURL: destination, revision: "export").contentState == "complete"
         let values = [
             "NONCE": nonce,
+            "LOCALE": escape(transcript.locale),
+            "COMPLETE": completed ? "true" : "false",
             "APP_ICON": icon,
             "TITLE": escape(recording.title),
             "APPLICATION": escape(recording.applicationName),
@@ -168,7 +170,7 @@ enum TranscriptHTMLWriter {
                     let icon = segment.source == .microphone ? "mic" : "speaker"
                     let engine = escape(segment.engine ?? "Apple SpeechTranscriber")
                     try write("""
-                    <article class="segment" id="segment-\(index)" data-start="\(segment.start)" data-end="\(segment.end)">
+                    <article class="segment" id="segment-\(index)" data-start="\(segment.start)" data-end="\(segment.end)" data-source="\(segment.source.rawValue)" data-speaker-id="\(segment.speakerID?.uuidString ?? "")">
                       <div class="segment-meta">
                         \(timestamp)
                         <div class="segment-labels">

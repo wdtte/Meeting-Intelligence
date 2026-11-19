@@ -72,7 +72,10 @@ struct TranscriptPanel: View {
         if live, let notice = model.transcriptionNotice { return notice }
         if isRunning && !isCloudRunning { return "正在本地转写，音频已保存" }
         if live { return "每段音频保存后更新本地字幕，约 10 秒一次" }
-        if document?.status == "completed" { return segments.isEmpty ? "转写完成，未识别到语音" : "本地转写完成" }
+        if document?.status == "completed" {
+            if recording?.importMetadata?.format == "html" { return "已从 HTML 导入现有内容" }
+            return segments.isEmpty ? "转写完成，未识别到语音" : "本地转写完成"
+        }
         return "可从已保存的录音继续转写"
     }
     private var hasAudio: Bool { (recording?.duration ?? 0) > 0 }
@@ -378,7 +381,7 @@ struct TranscriptPanel: View {
                 if document?.cloud?.status != "completed" {
                     Button("继续云端转写", systemImage: "cloud") { model.transcribeSelected() }.disabled(!hasAudio)
                 }
-            } else if document?.status != "completed" {
+            } else if document?.status != "completed", recording?.importMetadata?.format != "html" {
                 Button("继续本地转写", systemImage: "text.bubble") { model.transcribeSelected() }.disabled(!hasAudio)
             }
             if !cloudRequested {

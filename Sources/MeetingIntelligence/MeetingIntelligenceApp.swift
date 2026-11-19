@@ -98,7 +98,7 @@ private struct MenuBarContent: View {
     var body: some View {
         Text("Meeting Intelligence")
         if model.isBusy {
-            Text(model.importProgress != nil ? "正在导入音频" : "正在录制 · \(model.captureName)")
+            Text(model.importProgress != nil ? "正在导入文件" : "正在录制 · \(model.captureName)")
             Button("结束录音") { Task { await model.stop() } }.disabled(model.state != .recording)
         }
         Button("打开主窗口") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
